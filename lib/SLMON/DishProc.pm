@@ -4,11 +4,39 @@ use strict;
 use warnings;
 
 use Fcntl qw(F_SETFD);
+use IO::Socket::INET;
 use SLMON ();
 use SLMON::Config;
 use SLMON::History;
 use SLMON::Imsg;
 use SLMON::StatusMap;
+
+# gRPC reports an unreachable dish as a deadline or a failed connect, and
+# croak appends a source location. The operator message is the same fact
+# slmon once prints.
+sub rpc_warn {
+	my ($target, $err) = @_;
+	$err //= '';
+	$err =~ s/\s+at \S+ line \d+\.?//g;
+	$err =~ s/\s+\z//;
+	if ($err =~ /Deadline Exceeded|failed to connect|Connection refused|Connection timed out/i) {
+		return "slmon: dish: $target does not answer\n";
+	}
+	return "slmon: dish: $target: $err\n";
+}
+
+sub _reachable {
+	my ($host, $port) = @_;
+	my $sock = IO::Socket::INET->new(
+		PeerAddr => $host,
+		PeerPort => $port,
+		Proto    => 'tcp',
+		Timeout  => 2,
+	);
+	return 0 if !$sock;
+	close $sock;
+	return 1;
+}
 
 sub pack_map {
 	my ($doc, $ts) = @_;
@@ -109,10 +137,18 @@ sub run {
 	my $next_map = 0;
 	my $boot;
 	my $last_outage = '';
+	my $reported = '';
 	while (1) {
 		my $wake = _wait($imsg, $next);
 		last if $wake && $wake->{type} == SLMON::IMSG_SHUTDOWN;
 		my $now = time;
+		if (!_reachable($host, $port)) {
+			my $msg = "slmon: dish: $target does not answer\n";
+			warn $msg if $msg ne $reported;
+			$reported = $msg;
+			$next = time + $interval;
+			next;
+		}
 		eval {
 			my $raw = SLMON::Dish::call($target, 'status');
 			my $doc = SLMON::json_decode($raw);
@@ -144,7 +180,14 @@ sub run {
 				$next_map = $now + 300;
 			}
 		};
-		warn "slmon: dish: $@" if $@;
+		if ($@) {
+			my $msg = rpc_warn($target, $@);
+			warn $msg if $msg ne $reported;
+			$reported = $msg;
+		} elsif ($reported ne '') {
+			warn "slmon: dish: $target answered\n";
+			$reported = '';
+		}
 		$next = time + $interval;
 	}
 	exit 0;

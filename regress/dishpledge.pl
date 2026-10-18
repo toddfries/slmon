@@ -11,6 +11,12 @@ use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../blib";
 use SLMON::Dish;
 use SLMON::DishProc;
 
+my $down = SLMON::DishProc::rpc_warn(
+	'100.69.0.1:9200',
+	"status rpc: Deadline Exceeded at /home/todd/git/sw/slmon/lib/SLMON/DishProc.pm line 117.\n",
+);
+die "deadline message: $down" if $down ne "slmon: dish: 100.69.0.1:9200 does not answer\n";
+
 SLMON::DishProc::_try_pledge();
 if (open my $fh, '<', '/etc/passwd') {
 	die "dish pledge left /etc/passwd readable\n";

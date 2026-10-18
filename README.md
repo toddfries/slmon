@@ -11,7 +11,8 @@ Override it in the config file when the dish is somewhere else.
 
 This host currently has no working route to `100.69.0.1` (the default route
 is the LAN gateway, and a poll of TCP port 9200 does not answer). `slmon once`
-says so and returns. Point a route at the dish, or set `dish_host`, before
+says so and returns. `slmon start` keeps running and logs the same fact once,
+until the dish answers. Point a route at the dish, or set `dish_host`, before
 expecting live samples.
 
 The manual is `man/man8/slmon.8` (`mandoc man/man8/slmon.8`).

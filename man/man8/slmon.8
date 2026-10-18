@@ -137,6 +137,9 @@ The history ring is one sample per second.
 The obstruction map is fetched every five minutes.
 Each RPC deadline is five seconds.
 The channel is plaintext on port 9200.
+If that port does not answer, the child logs that once and tries again
+on the next interval.
+It keeps running.
 .It db
 The only process that writes the database.
 Other processes send it messages and read rows back the same way.
