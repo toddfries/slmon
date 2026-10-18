@@ -113,6 +113,11 @@ ok($cfg->{dish_interval_s} == 30, 'default dish interval');
 ok($cfg->{dish_host} eq '192.168.100.1', 'default dish host');
 ok($cfg->{rollup_interval_s} == 60, 'default rollup interval');
 ok($cfg->{raw_retention_days} == 90, 'default raw retention');
+ok($cfg->{log_level} eq 'info', 'default log level is info');
+my $dbg = SLMON::Config::parse("log_level = debug\n");
+ok($dbg->{log_level} eq 'debug', 'debug log level accepted');
+eval { SLMON::Config::parse("log_level = trace\n") };
+ok($@ && $@ =~ /log_level/, 'log level must be info or debug');
 eval { SLMON::Config::parse("nope = 1\n") };
 ok($@ && $@ =~ /unknown config key/, 'unknown key rejected');
 eval { SLMON::Config::parse("db = pg\n") };
@@ -206,6 +211,10 @@ my $minrow = $dbh->selectrow_hashref(
 ok($minrow && $minrow->{sample_count} == 60, 'one minutely row');
 ok($minrow && $minrow->{down_bytes} == 60000, 'minutely bytes are sum(bps)/8');
 ok($minrow && abs($minrow->{avg_ping_latency_ms} - 40) < 0.001, 'null latency skipped in average');
+ok($minrow && defined $minrow->{jitter_ms} && abs($minrow->{jitter_ms}) < 0.001,
+    'flat minute jitter is zero');
+ok($minrow && !defined $minrow->{avg_obstr_fraction},
+    'minute obstruction stays null without status polls');
 SLMON::Rollup::roll_hours($dbh, $day + 3600);
 my ($hbytes) = $dbh->selectrow_array(
     'SELECT down_bytes FROM metrics_hourly WHERE ts_hour = ?', undef, $day);
@@ -214,6 +223,87 @@ SLMON::Rollup::roll_days($dbh, $day + 86400);
 my ($dbytes) = $dbh->selectrow_array(
     'SELECT down_bytes FROM metrics_daily WHERE ts_day = ?', undef, $day);
 ok(defined $dbytes && $dbytes == 60000, 'daily rollup');
+
+SLMON::DB::insert_metric($dbh, {
+	ts => $day + 10, obstr_fraction => 0.002,
+	ping_drop_rate => 0, alerts_bitfield => 0,
+});
+SLMON::DB::insert_metric($dbh, {
+	ts => $day + 40, obstr_fraction => 0.008,
+	ping_drop_rate => 0, alerts_bitfield => 0,
+});
+SLMON::Rollup::roll_minutes($dbh, $day + 60);
+$minrow = $dbh->selectrow_hashref(
+    'SELECT * FROM metrics_minutely WHERE ts_minute = ?', undef, $day);
+ok($minrow && abs($minrow->{avg_obstr_fraction} - 0.005) < 1e-9,
+    'minute obstruction is the average of status polls');
+ok($minrow && abs($minrow->{max_obstr_fraction} - 0.008) < 1e-9,
+    'minute obstruction max is the highest status poll');
+my @spread;
+for my $i (0 .. 59) {
+	push @spread, {
+		counter => 800 + $i, ts => $day + 120 + $i,
+		drop => 0, latency => ($i < 30 ? 10 : 30),
+		down_bps => 8000, up_bps => 1000,
+	};
+}
+SLMON::DB::ingest_history($dbh, { bootcount => 9, samples => \@spread });
+SLMON::DB::insert_metric($dbh, {
+	ts => $day + 130, obstr_fraction => 0.02,
+	ping_drop_rate => 0, alerts_bitfield => 0,
+});
+SLMON::Rollup::roll_minutes($dbh, $day + 240);
+my $m2 = $dbh->selectrow_hashref(
+    'SELECT * FROM metrics_minutely WHERE ts_minute = ?', undef, $day + 120);
+ok($m2 && abs($m2->{jitter_ms} - 20) < 0.001,
+    'minute jitter is max latency minus min');
+SLMON::Rollup::roll_hours($dbh, $day + 3600);
+my $hour = $dbh->selectrow_hashref(
+    'SELECT * FROM metrics_hourly WHERE ts_hour = ?', undef, $day);
+ok($hour && abs($hour->{jitter_ms} - 30) < 0.001,
+    'hourly jitter is the spread across the hour');
+ok($hour && abs($hour->{max_obstr_fraction} - 0.02) < 1e-9,
+    'hourly obstruction max is the highest minute');
+ok($hour && abs($hour->{avg_obstr_fraction} - 0.0125) < 1e-9,
+    'hourly obstruction averages the minute averages');
+SLMON::Rollup::roll_days($dbh, $day + 86400);
+my $dayrow = $dbh->selectrow_hashref(
+    'SELECT * FROM metrics_daily WHERE ts_day = ?', undef, $day);
+ok($dayrow && abs($dayrow->{jitter_ms} - 30) < 0.001,
+    'daily jitter keeps the spread');
+ok($dayrow && abs($dayrow->{max_obstr_fraction} - 0.02) < 1e-9,
+    'daily obstruction max keeps the hour max');
+
+my $gap = $day + 3600;
+$dbh->do(
+    'INSERT INTO metrics_minutely (ts_minute, sample_count, down_bytes, up_bytes) VALUES (?,?,?,?)',
+    undef, $gap, 1, 1, 1);
+SLMON::DB::ingest_history($dbh, {
+	bootcount => 9,
+	samples => [
+		{ counter => 9000, ts => $gap + 1, drop => 0, latency => 5, down_bps => 8, up_bps => 8 },
+		{ counter => 9001, ts => $gap + 2, drop => 0, latency => 17, down_bps => 8, up_bps => 8 },
+	],
+});
+SLMON::DB::insert_metric($dbh, {
+	ts => $gap + 3, obstr_fraction => 0.4,
+	ping_drop_rate => 0, alerts_bitfield => 0,
+});
+$dbh->do(
+    'INSERT INTO metrics_hourly (ts_hour, sample_count, down_bytes, up_bytes) VALUES (?,?,?,?)',
+    undef, $gap, 1, 1, 1);
+SLMON::Rollup::fill_gaps($dbh);
+my $g = $dbh->selectrow_hashref(
+    'SELECT * FROM metrics_minutely WHERE ts_minute = ?', undef, $gap);
+ok($g && abs($g->{jitter_ms} - 12) < 0.001
+    && abs($g->{avg_obstr_fraction} - 0.4) < 1e-9,
+    'a stored minute picks up obstruction and jitter still on hand');
+my $hg = $dbh->selectrow_hashref(
+    'SELECT * FROM metrics_hourly WHERE ts_hour = ?', undef, $gap);
+ok($hg && abs($hg->{jitter_ms} - 12) < 0.001
+    && abs($hg->{max_obstr_fraction} - 0.4) < 1e-9
+    && $hg->{down_bytes} == 1,
+    'a stored hour fills obstruction and jitter without replacing bytes');
 
 my $clock = 1_800_000_000;
 my $raw_cut = $clock - 90 * 86400;
@@ -226,7 +316,10 @@ SLMON::DB::ingest_history($dbh, {
 		{ counter => 901, ts => $raw_cut + 1, drop => 0, latency => 1, down_bps => 8000, up_bps => 8 },
 	],
 });
-SLMON::DB::insert_metric($dbh, { ts => $raw_cut - 1, ping_drop_rate => 0, alerts_bitfield => 0 });
+SLMON::DB::insert_metric($dbh, {
+	ts => $raw_cut - 1, ping_drop_rate => 0, alerts_bitfield => 0,
+	obstr_fraction => 0.25,
+});
 SLMON::DB::insert_metric($dbh, { ts => $raw_cut + 1, ping_drop_rate => 0, alerts_bitfield => 0 });
 $dbh->do('INSERT INTO metrics_hourly (ts_hour, down_bytes, up_bytes, sample_count) VALUES (?,?,?,?)',
     undef, $hour_cut - 1, 5, 1, 1);
@@ -247,6 +340,12 @@ my $old_hour = int(($raw_cut - 1) / 3600) * 3600;
 my ($comp) = $dbh->selectrow_array(
     'SELECT down_bytes FROM metrics_hourly WHERE ts_hour = ?', undef, $old_hour);
 ok(defined $comp && $comp == 1000, 'old raw row compressed into hourly');
+my ($comp_ob, $comp_j) = $dbh->selectrow_array(
+    'SELECT avg_obstr_fraction, jitter_ms FROM metrics_hourly WHERE ts_hour = ?',
+    undef, $old_hour);
+ok(defined $comp_ob && abs($comp_ob - 0.25) < 1e-9
+    && defined $comp_j && abs($comp_j) < 1e-9,
+    'compression keeps obstruction and jitter');
 my ($old_metric) = $dbh->selectrow_array(
     'SELECT COUNT(*) FROM metrics WHERE ts < ?', undef, $raw_cut);
 my ($new_metric) = $dbh->selectrow_array(
@@ -335,6 +434,7 @@ my $home = SLMON::Http::respond(http_req('GET', '/',
 				ts => 2_000, downlink_bps => 8_000_000,
 				uplink_bps => 400_000, ping_latency_ms => 40,
 				ping_drop_rate => 0, obstr_fraction => 0.004,
+				jitter_ms => 12,
 			}],
 			latest => {
 				ts => 2_000, downlink_bps => 8_000_000,
@@ -360,7 +460,8 @@ ok($home =~ /Signed in as admin/ && $home =~ m{action="/logout"}
     && $home =~ /8\.0 Mbit\/s/ && $home =~ /aria-current="page"/
     && $home =~ /href="\/\?range=24h"/ && $home =~ /a&lt;b/
     && $home !~ /a<b/ && $home =~ /motors_stuck/
-    && $home =~ /class="series"/ && $home =~ m{<h2>Downlink},
+    && $home =~ /class="series"/ && $home =~ m{<h2>Downlink}
+    && $home =~ m{<h2>Jitter},
     'dashboard charts the stored samples');
 my $again = SLMON::Http::respond(http_req('GET', '/login',
     headers => { cookie => "slmon_session=$tok" }), $hctx);
@@ -414,6 +515,38 @@ ok(SLMON::Dash::series_table('1h') eq 'metrics'
     && SLMON::Dash::series_table('24h') eq 'metrics_minutely'
     && SLMON::Dash::series_table('7d') eq 'metrics_hourly',
     'chart window picks the rollup table');
+ok(!SLMON::Dash::tier_has_obstr([{ avg_ping_latency_ms => 1 }]),
+    'a rollup without obstruction is not ready');
+ok(SLMON::Dash::tier_has_obstr([{ avg_obstr_fraction => 0 }]),
+    'a zero obstruction fraction counts as stored');
+
+my $oldcfg = SLMON::Config::parse('');
+SLMON::Config::apply_paths($oldcfg, db_path => "$dir/old.db", root => '/none');
+my $pre = DBI->connect("dbi:SQLite:dbname=$dir/old.db", '', '',
+    { RaiseError => 1, PrintError => 0 });
+$pre->do(q{CREATE TABLE metrics_minutely (
+    id INTEGER PRIMARY KEY, ts_minute BIGINT NOT NULL UNIQUE,
+    avg_obstr_fraction REAL, max_obstr_fraction REAL)});
+$pre->do(q{CREATE TABLE metrics_hourly (
+    id INTEGER PRIMARY KEY, ts_hour BIGINT NOT NULL UNIQUE,
+    avg_obstr_fraction REAL)});
+$pre->do(q{CREATE TABLE metrics_daily (
+    id INTEGER PRIMARY KEY, ts_day BIGINT NOT NULL UNIQUE,
+    avg_obstr_fraction REAL)});
+$pre->disconnect;
+my $oldh = SLMON::DB::open_db($oldcfg);
+SLMON::DB::init_schema($oldh);
+sub _colnames {
+	my ($h, $table) = @_;
+	my $info = $h->selectall_arrayref("PRAGMA table_info($table)");
+	return map { $_->[1] => 1 } @$info;
+}
+my %mc = _colnames($oldh, 'metrics_minutely');
+my %hc = _colnames($oldh, 'metrics_hourly');
+my %dc = _colnames($oldh, 'metrics_daily');
+ok($mc{jitter_ms} && $hc{jitter_ms} && $hc{max_obstr_fraction}
+    && $hc{min_ping_latency_ms} && $dc{jitter_ms} && $dc{max_obstr_fraction},
+    'an existing database gains the rollup columns');
 
 print "$n tests, $fail failed\n";
 exit($fail ? 1 : 0);

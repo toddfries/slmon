@@ -97,9 +97,13 @@ run with a pty password prompt and a fake dish. The PostgreSQL targets
 ## Dashboard
 
 `/` shows the latest downlink, uplink, latency, loss, obstruction, and
-uptime, then charts of those series. One hour uses status polls. Six and
-24 hours use the per-minute rollup. Seven days uses the hourly rollup.
-The obstruction chart uses status polls for every range.
+uptime, then charts of those series plus jitter. One hour uses status
+polls. Six and 24 hours use the per-minute rollup. Seven days uses the
+hourly rollup. Obstruction on the one-hour chart is the status poll. On a
+longer range it is the average stored with that rollup, or status polls
+when the rollup has no obstruction yet. Jitter is the spread of the 1 Hz
+latencies in the bucket (highest minus lowest). The one-hour jitter chart
+reads the per-minute rollup.
 The obstruction grid is the newest map from the dish: gray is unmeasured,
 blue is clear, red is blocked. JSON for the same tables remains at
 `/api/latest/TABLE` and `/api/raw/TABLE`.

@@ -215,6 +215,12 @@ Comma-separated hosts.
 .Li 200 .
 .It Va spike_min_s
 .Li 30 .
+.It Va log_level
+.Li info
+or
+.Li debug .
+.Li debug
+records rollup bucket counts and which table a chart read.
 .El
 .Pp
 A sample file:
@@ -286,7 +292,13 @@ or
 One hour is drawn from status polls.
 Six and 24 hours use the per-minute rollup.
 Seven days uses the hourly rollup.
-The obstruction chart uses status polls for every range.
+Obstruction on the one-hour chart is the status poll.
+On a longer range it is the average stored with that rollup.
+When that rollup has no obstruction yet, the chart reads status polls.
+Jitter is the highest 1 Hz latency in the bucket minus the lowest,
+in milliseconds.
+The one-hour jitter chart uses the per-minute rollup.
+A longer range uses the jitter stored on the same rows as the other charts.
 A logout button posts to
 .Pa /logout .
 .It Cm GET /login

@@ -137,6 +137,7 @@ sub ddl_for {
 			max_ping_latency_ms $real,
 			avg_obstr_fraction $real,
 			max_obstr_fraction $real,
+			jitter_ms $real,
 			avg_downlink_bps $real,
 			min_downlink_bps $real,
 			max_downlink_bps $real,
@@ -152,8 +153,11 @@ sub ddl_for {
 			ts_hour $big NOT NULL UNIQUE,
 			avg_ping_drop_rate $real,
 			avg_ping_latency_ms $real,
+			min_ping_latency_ms $real,
 			max_ping_latency_ms $real,
 			avg_obstr_fraction $real,
+			max_obstr_fraction $real,
+			jitter_ms $real,
 			avg_downlink_bps $real,
 			avg_uplink_bps $real,
 			down_bytes $big,
@@ -165,8 +169,11 @@ sub ddl_for {
 			ts_day $big NOT NULL UNIQUE,
 			avg_ping_drop_rate $real,
 			avg_ping_latency_ms $real,
+			min_ping_latency_ms $real,
 			max_ping_latency_ms $real,
 			avg_obstr_fraction $real,
+			max_obstr_fraction $real,
+			jitter_ms $real,
 			avg_downlink_bps $real,
 			avg_uplink_bps $real,
 			down_bytes $big,
@@ -204,12 +211,54 @@ sub ddl_for {
 	);
 }
 
+sub _has_column {
+	my ($dbh, $table, $col) = @_;
+	my $driver = $dbh->{private_slmon_driver} || 'sqlite';
+	if ($driver eq 'pg') {
+		my ($n) = $dbh->selectrow_array(q{
+			SELECT COUNT(*) FROM information_schema.columns
+			WHERE table_schema = current_schema()
+			  AND table_name = ? AND column_name = ?
+		}, undef, $table, $col);
+		return $n ? 1 : 0;
+	}
+	my $info = $dbh->selectall_arrayref("PRAGMA table_info($table)");
+	for my $colinfo (@{ $info || [] }) {
+		return 1 if defined $colinfo->[1] && $colinfo->[1] eq $col;
+	}
+	return 0;
+}
+
+# CREATE TABLE IF NOT EXISTS does not add columns to a database that
+# already has the table. These alters are the step that does.
+sub _migrate {
+	my ($dbh) = @_;
+	my $driver = $dbh->{private_slmon_driver} || 'sqlite';
+	my $real = _types($driver)->{real};
+	my @add = (
+		[ 'metrics_minutely', 'jitter_ms' ],
+		[ 'metrics_hourly', 'min_ping_latency_ms' ],
+		[ 'metrics_hourly', 'max_obstr_fraction' ],
+		[ 'metrics_hourly', 'jitter_ms' ],
+		[ 'metrics_daily', 'min_ping_latency_ms' ],
+		[ 'metrics_daily', 'max_obstr_fraction' ],
+		[ 'metrics_daily', 'jitter_ms' ],
+	);
+	for my $spec (@add) {
+		my ($table, $col) = @$spec;
+		next if _has_column($dbh, $table, $col);
+		$dbh->do("ALTER TABLE $table ADD COLUMN $col $real");
+	}
+	return;
+}
+
 sub init_schema {
 	my ($dbh) = @_;
 	my $name = $dbh->{private_slmon_driver} || 'sqlite';
 	for my $sql (ddl_for($name)) {
 		$dbh->do($sql);
 	}
+	_migrate($dbh);
 	$dbh->do(q{
 		INSERT INTO collector_state
 		    (id, run_id, last_counter, bootcount, last_rolled_minute, last_retain_day)
@@ -565,9 +614,9 @@ sub _dispatch_peer {
 	} elsif ($type == SLMON::IMSG_HISTORY) {
 		my $doc = SLMON::json_decode($msg->{data});
 		ingest_history($dbh, $doc);
-		SLMON::Rollup::roll_minutes($dbh, time);
-		SLMON::Rollup::roll_hours($dbh, time);
-		SLMON::Rollup::roll_days($dbh, time);
+		SLMON::Rollup::roll_minutes($dbh, time, $cfg);
+		SLMON::Rollup::roll_hours($dbh, time, $cfg);
+		SLMON::Rollup::roll_days($dbh, time, $cfg);
 		$roll->{last} = time;
 	} elsif ($type == SLMON::IMSG_DISH_INFO) {
 		upsert_dish_info($dbh, SLMON::json_decode($msg->{data}));
@@ -603,14 +652,15 @@ sub _maybe_roll {
 	my $every = $cfg->{rollup_interval_s} || 60;
 	return if $now - ($roll->{last} || 0) < $every;
 	$roll->{last} = $now;
-	SLMON::Rollup::roll_minutes($dbh, $now);
-	SLMON::Rollup::roll_hours($dbh, $now);
-	SLMON::Rollup::roll_days($dbh, $now);
+	SLMON::Rollup::roll_minutes($dbh, $now, $cfg);
+	SLMON::Rollup::roll_hours($dbh, $now, $cfg);
+	SLMON::Rollup::roll_days($dbh, $now, $cfg);
 	if ($now - ($roll->{retain} || 0) >= 86400) {
 		SLMON::Rollup::retain($dbh, $now,
 		    $cfg->{raw_retention_days},
 		    $cfg->{hourly_rollup_days},
-		    $cfg->{minutely_retention_days});
+		    $cfg->{minutely_retention_days},
+		    $cfg);
 		$roll->{retain} = $now;
 	}
 	return;

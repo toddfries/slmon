@@ -1,14 +1,14 @@
 # slmon crib
 
-2026-10-18. The tool described here is commit `87a4e17`. Read this file before changing the tree.
+2026-10-18. Read this file before changing the tree. The chart page is commit `87a4e17`. Rollup obstruction and jitter are in the tree after that.
 
 Shared rules are `si/aibootstrap/behavior.md` and `si/aibootstrap/values.md`. This file overrides them for slmon. `si/aibootstrap` is a separate git repository. Do not add it to slmon's commits. `aihandbook` is a future name for that handbook, not a directory. The handbook text also says a later rename may be `sihandbook/`. Until a rename is on disk, read `si/aibootstrap/`.
 
-`man/man8/slmon.8` and `README.md` describe the tool as it runs. They do not describe phases or this conversation. Later-phase ideas are parked in `si/slmon-plan.md`. Do not implement that file until asked.
+`man/man8/slmon.8` and `README.md` describe the tool as it runs. They do not describe phases or this conversation. The approved follow-on is `si/slmon-plan.md`. Step 1 is in the tree: rollup rows store obstruction and jitter. Do not start a later step until the one before it works.
 
 ## What it is
 
-Native Perl Starlink monitor. Unofficial, not affiliated with SpaceX. No Docker. BenGhosti/starlink-monitor is a behavior spec only (all-rights-reserved; do not copy source or its HTML/CSS/JS). Protocol reference is public-domain sparky8512/starlink-grpc-tools plus `SpaceX.API.Device.Device/Handle`.
+Native Perl Starlink monitor. Unofficial, not affiliated with SpaceX. No Docker. Code, pages, and wording in this tree are original. Other projects are documentation, opened only to troubleshoot something this tree is already doing. They are not a feature list and they are not named here. The dish service is `SpaceX.API.Device.Device`, rpc `Handle`.
 
 One checkout, several processes, libc `imsg` between them. SQLite by default, PostgreSQL optional, same DML. OpenBSD. Perl 5.42. System `libgrpc++` and `libprotobuf` are linked on purpose, and only inside the dish child after `fork`.
 
@@ -23,7 +23,7 @@ One checkout, several processes, libc `imsg` between them. SQLite by default, Po
 - `59dcf50` — browser login. `GET /login` form posts `user` and `password` to `/login`. Success sets `slmon_session` and redirects to `/`. `POST /api/login` remains the JSON login.
 - `87a4e17` — `GET /` with a session is the dashboard (inline SVG, no script, no CDN). That request was charts of data already stored. It was not the rest of the old output list (health score, SLA, CSV, alerts, speed tests).
 
-A follow-on list (chart refresh, SLA windows including `ever`, notify plugins, then optimization, aging, baselines) was drafted and then set aside. It is `si/slmon-plan.md`.
+The follow-on (windows `24h`/`7d`/`30d`/`365d`/`ever`, per-panel refresh, notify plugins, then optimization, aging, baselines) is approved in `si/slmon-plan.md`. Step 1 is the rollup columns below. Later steps stay in that file until the previous step works.
 
 ## Processes
 
@@ -53,9 +53,11 @@ Time columns used by queries: `history_samples.ts`, `metrics.ts`, `metrics_minut
 
 `history_samples` is unique on `(run_id, dish_counter)`. A new run starts when bootcount changes or the tip counter moves backwards. Drop rate ≥ 1 stores NULL latency.
 
-Rollups run in the db child. Byte columns are `sum(bps)/8`. An empty minute roll does not advance the cursor; the newest completed minute stays open. `roll_minutes` writes NULL for both obstruction columns. Hourly rollup averages that NULL, so it stays NULL. The dashboard's obstruction series is raw `metrics` for every range whose throughput series is a rollup. Do not "fix" the chart by inventing obstruction inside `history_samples`.
+Rollups run in the db child. Byte columns are `sum(bps)/8`. An empty minute roll does not advance the cursor; the newest completed minute stays open. `roll_minutes` copies obstruction from `metrics` in that minute (`avg_obstr_fraction`, `max_obstr_fraction`) and stores `jitter_ms` as max `ping_latency_ms` minus min in that minute. NULL latencies are ignored. Hour and day rows average the finer obstruction averages, take the max of the finer maxima, and store jitter as the finer max latency minus the finer min latency. That spread is not an average of the finer jitter values. `history_samples` has no obstruction column. Do not invent one.
 
-Retention, in `SLMON::Rollup::retain`: raw history and `metrics` older than 90 days compressed into hourly (obstruction stored NULL there) then deleted; hourly older than 365 days averaged into daily then deleted; minutely older than 730 days deleted. Config key for the raw window is `raw_retention_days`. `events`, `weather`, `speedtests`, and `alert_queue` are not aged. `obstruction_map` is a single row. `speedtests` and `alert_queue` have schema and no writer. `metrics_daily` stays empty until an hourly row is old enough. Weather stays empty until lat/lon are set. None of those are unfinished collection.
+An existing database does not grow columns from `CREATE TABLE IF NOT EXISTS`. `SLMON::DB::_migrate` runs `ALTER TABLE` at schema init: `jitter_ms` on the three rollup tables, plus `max_obstr_fraction` and `min_ping_latency_ms` on the hour and day tables. The first rollup after that fills stored rows whose source samples are still in the database. `log_level` is `info` (default) or `debug`. Debug logs rollup bucket counts and which table a chart read. It does not log the session secret, the password, or `pg_password`.
+
+Retention, in `SLMON::Rollup::retain`: raw history and `metrics` older than 90 days compressed into hourly, then deleted. That compression reads obstruction from `metrics` and jitter from the history latencies before the delete. A conflicting hourly row keeps the throughput already stored and fills a NULL obstruction or jitter. Hourly older than 365 days averaged into daily then deleted. Minutely older than 730 days deleted. Config key for the raw window is `raw_retention_days`. `events`, `weather`, `speedtests`, and `alert_queue` are not aged. `obstruction_map` is a single row. `speedtests` and `alert_queue` have schema and no writer. `metrics_daily` stays empty until an hourly row is old enough. Weather stays empty until lat/lon are set. None of those are unfinished collection.
 
 ## HTTP
 
@@ -70,7 +72,7 @@ Listener default `127.0.0.1:8080`. One request per connection, `Connection: clos
 
 Cookie `slmon_session`: HMAC-SHA256, 12h, HttpOnly, SameSite=Lax, Path=/, Max-Age=43200. Password check stays in the db child. Five failures per IP per five minutes.
 
-Dashboard ranges: `?range=1h|6h|24h|7d`, default `6h`, invalid falls back to `6h`. `1h` reads `metrics`. `6h` and `24h` read `metrics_minutely`. `7d` reads `metrics_hourly`. Obstruction for the non-`1h` ranges is a second `metrics` query (limit 20000). Downsample above 480 points. Y axis starts at 0 with a 1/2/5/10 max. Missing numbers render as ASCII `n/a`. A UTF-8-flagged em dash breaks `Content-Length` because that header uses character length. The degree sign in azimuth/elevation is raw UTF-8 bytes in the source, without `use utf8`, so the string stays bytes. Stale if the latest sample is older than 120s. Alert names come from `SLMON::StatusMap::alert_names` (`motors_stuck` is bit 1, value 2). Map: `unpack('f<*')`, class `u` unmeasured, `o` blocked (any 0 in a downsample block stays blocked), `c` clear. Omit the map section when there is no row.
+Dashboard ranges: `?range=1h|6h|24h|7d`, default `6h`, invalid falls back to `6h`. `1h` reads `metrics`. `6h` and `24h` read `metrics_minutely`. `7d` reads `metrics_hourly`. Obstruction uses those rows when the rollup already has a fraction, including a stored zero. Otherwise a longer range still reads `metrics` (limit 20000). The one-hour obstruction series is `metrics`. Jitter is `jitter_ms` on the rollup. The one-hour jitter chart reads `metrics_minutely`. The five-window control (`24h`, `7d`, `30d`, `365d`, `ever`) is the next step, not this page. Downsample above 480 points. Y axis starts at 0 with a 1/2/5/10 max. Missing numbers render as ASCII `n/a`. A UTF-8-flagged em dash breaks `Content-Length` because that header uses character length. The degree sign in azimuth/elevation is raw UTF-8 bytes in the source, without `use utf8`, so the string stays bytes. Stale if the latest sample is older than 120s. Alert names come from `SLMON::StatusMap::alert_names` (`motors_stuck` is bit 1, value 2). Map: `unpack('f<*')`, class `u` unmeasured, `o` blocked (any 0 in a downsample block stays blocked), `c` clear. Omit the map section when there is no row.
 
 Unit tests of `GET /` pass `$ctx->{dash}` because they have no imsg. A query error still renders the page, including the escaped user, with "The database did not answer."
 

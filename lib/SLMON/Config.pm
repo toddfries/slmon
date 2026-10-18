@@ -26,6 +26,7 @@ my %DEFAULT = (
 	disconnect_failures     => 3,
 	spike_ms                => 200,
 	spike_min_s             => 30,
+	log_level               => 'info',
 );
 
 my %INT_KEY = map { $_ => 1 } qw(
@@ -59,6 +60,8 @@ sub parse {
 	}
 	die "slmon: dish_interval_s must be at least 1\n" if $cfg{dish_interval_s} < 1;
 	die "slmon: rollup_interval_s must be at least 1\n" if $cfg{rollup_interval_s} < 1;
+	die "slmon: log_level must be info or debug\n"
+	    if $cfg{log_level} ne 'info' && $cfg{log_level} ne 'debug';
 	if ($cfg{latitude} ne '' || $cfg{longitude} ne '') {
 		die "slmon: latitude and longitude must both be set\n"
 		    if $cfg{latitude} eq '' || $cfg{longitude} eq '';

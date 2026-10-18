@@ -26,6 +26,16 @@ sub range_name {
 	return '6h';
 }
 
+# True when a rollup tier already carries an obstruction fraction.
+# A stored zero counts. Null does not.
+sub tier_has_obstr {
+	my ($rows) = @_;
+	for my $row (@{ $rows || [] }) {
+		return 1 if defined _num($row->{avg_obstr_fraction} // $row->{obstr_fraction});
+	}
+	return 0;
+}
+
 sub series_table {
 	my ($name) = @_;
 	$name = range_name($name);
@@ -70,6 +80,7 @@ sub points {
 			lat_max => _num($row->{max_ping_latency_ms}),
 			drop    => _num($row->{ping_drop_rate} // $row->{avg_ping_drop_rate}),
 			obstr   => _num($row->{obstr_fraction} // $row->{avg_obstr_fraction}),
+			jitter  => _num($row->{jitter_ms}),
 		};
 	}
 	@out = sort { $a->{t} <=> $b->{t} } @out;
@@ -329,6 +340,7 @@ sub page {
 	my $to = $d->{window_to} // $now;
 	my $pts = points($d->{series});
 	my $obpts = points(defined $d->{obstruction} ? $d->{obstruction} : $d->{series});
+	my $jpts = points(defined $d->{jitter} ? $d->{jitter} : $d->{series});
 	my $latest = $d->{latest} || {};
 	my $info = $d->{info} || {};
 	my ($dscale, $dunit) = _rate_unit($pts, 'down');
@@ -337,6 +349,7 @@ sub page {
 		_series_chart('Downlink', $dunit, 'down', $pts, $from, $to, 1 / $dscale),
 		_series_chart('Uplink', $uunit, 'up', $pts, $from, $to, 1 / $uscale),
 		_series_chart('Latency', 'ms', 'lat', $pts, $from, $to, 1),
+		_series_chart('Jitter', 'ms', 'jitter', $jpts, $from, $to, 1),
 		_series_chart('Packet loss', '%', 'drop', $pts, $from, $to, 100),
 		_series_chart('Obstruction', '%', 'obstr', $obpts, $from, $to, 100),
 	);

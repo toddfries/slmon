@@ -248,13 +248,29 @@ sub _dash_load {
 		op => 'raw', table => $table, from => $from, to => $now,
 		limit => 20000, order => 'asc',
 	});
-	# Obstruction is stored on status polls, not in the throughput rollup.
+	# Obstruction and jitter live on the rollup once that tier has them.
+	# Status polls remain the obstruction source for 1h, and for a longer
+	# range whose rollup does not have a fraction yet.
 	my $obstruction = $series;
-	if ($table ne 'metrics') {
+	my $obstr_from = 'series';
+	if ($table ne 'metrics' && !SLMON::Dash::tier_has_obstr($series)) {
 		$obstruction = _db_query($ctx->{imsg}, {
 			op => 'raw', table => 'metrics', from => $from, to => $now,
 			limit => 20000, order => 'asc',
 		});
+		$obstr_from = 'metrics';
+	}
+	my $jitter = $series;
+	if ($table eq 'metrics') {
+		$jitter = _db_query($ctx->{imsg}, {
+			op => 'raw', table => 'metrics_minutely', from => $from, to => $now,
+			limit => 20000, order => 'asc',
+		});
+	}
+	if (($ctx->{log_level} // '') eq 'debug') {
+		warn "slmon: dash range=$range table=$table rows=" . scalar(@$series)
+		    . " obstr=$obstr_from obstr_rows=" . scalar(@$obstruction)
+		    . " jitter_rows=" . scalar(@$jitter) . "\n";
 	}
 	my $latest = _db_query($ctx->{imsg}, { op => 'latest', table => 'metrics' });
 	my $info = _db_query($ctx->{imsg}, { op => 'latest', table => 'dish_info' });
@@ -266,6 +282,7 @@ sub _dash_load {
 	return {
 		series       => $series,
 		obstruction  => $obstruction,
+		jitter       => $jitter,
 		latest       => $latest->[0],
 		info         => $info->[0],
 		events       => $events,
@@ -364,7 +381,7 @@ sub respond {
 }
 
 sub _handle_client {
-	my ($cli, $imsg, $secret, $admin, $rate) = @_;
+	my ($cli, $imsg, $secret, $admin, $rate, $cfg) = @_;
 	my $req = eval { read_request($cli) };
 	if (!$req) {
 		return;
@@ -376,8 +393,9 @@ sub _handle_client {
 			secret => $secret,
 			admin  => $admin,
 			rate   => $rate,
-			ip     => $ip,
-			now    => time,
+			ip        => $ip,
+			now       => time,
+			log_level => $cfg->{log_level} // 'info',
 		});
 	};
 	if ($@) {
@@ -421,7 +439,7 @@ sub run {
 		next if !$n || !vec($rin, fileno($listen), 1);
 		my $cli = $listen->accept;
 		next if !$cli;
-		eval { _handle_client($cli, $imsg, $secret, $admin, $rate) };
+		eval { _handle_client($cli, $imsg, $secret, $admin, $rate, $cfg) };
 		warn "slmon: http client: $@" if $@;
 		close $cli;
 	}
