@@ -5,6 +5,9 @@ use warnings;
 
 use Fcntl qw(F_SETFD);
 use IO::Socket::INET;
+# A timed connect loads this from inside IO::Socket, after unveil.
+# Importing it would hide the builtin select().
+use IO::Select ();
 use SLMON ();
 use SLMON::Config;
 use SLMON::History;

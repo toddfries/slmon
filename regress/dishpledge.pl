@@ -21,6 +21,8 @@ SLMON::DishProc::_try_pledge();
 if (open my $fh, '<', '/etc/passwd') {
 	die "dish pledge left /etc/passwd readable\n";
 }
+my $probe = eval { SLMON::DishProc::_reachable('127.0.0.1', 1); 1 };
+die "timed connect after pledge: $@" if !$probe;
 eval { SLMON::Dish::call('127.0.0.1:1', 'status') };
 die "dish call was killed or returned success\n" if !$@;
 die "unexpected dish error: $@"
