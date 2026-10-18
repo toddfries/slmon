@@ -10,7 +10,10 @@ use SLMON ();
 use SLMON::Auth;
 use SLMON::Config;
 use SLMON::DB;
+use MIME::Base64 qw(encode_base64);
+use SLMON::Dash;
 use SLMON::Http;
+use SLMON::StatusMap;
 use SLMON::History;
 use SLMON::Obstruction;
 use SLMON::Watchdog;
@@ -297,7 +300,7 @@ sub http_req {
 	return {
 		method  => $method,
 		path    => $path,
-		query   => {},
+		query   => $opt{query} || {},
 		headers => $opt{headers} || {},
 		body    => $opt{body} // '',
 	};
@@ -319,10 +322,46 @@ ok($root =~ m{\AHTTP/1.0 303 } && $root =~ m{Location: /login},
     'root sends a browser to the login form');
 my $tok = SLMON::Auth::sign_session('admin', time + 3600, $secret);
 my $home = SLMON::Http::respond(http_req('GET', '/',
-    headers => { cookie => "slmon_session=$tok" }), $hctx);
-ok($home =~ /Signed in as admin/ && $home =~ m{/api/latest/history_samples}
-    && $home =~ m{action="/logout"},
-    'home after login');
+    headers => { cookie => "slmon_session=$tok" },
+    query => { range => '6h' }), {
+	%$hctx,
+	dash => sub {
+		return {
+			series => [{
+				ts => 1_000, downlink_bps => 1_000_000,
+				uplink_bps => 100_000, ping_latency_ms => 20,
+				ping_drop_rate => 0.01, obstr_fraction => 0.002,
+			}, {
+				ts => 2_000, downlink_bps => 8_000_000,
+				uplink_bps => 400_000, ping_latency_ms => 40,
+				ping_drop_rate => 0, obstr_fraction => 0.004,
+			}],
+			latest => {
+				ts => 2_000, downlink_bps => 8_000_000,
+				uplink_bps => 200_000, ping_latency_ms => 18,
+				ping_drop_rate => 0, obstr_fraction => 0.001,
+				uptime_s => 3600, direction_azimuth => -19.6,
+				direction_elevation => 68.5, snr => 1, gps_sats => 12,
+				alerts_bitfield => 2,
+			},
+			info => {
+				hardware_version => 'rev4',
+				software_version => '2026.09',
+				bootcount => 3,
+				device_id => 'a<b',
+			},
+			events => [{ ts => 1500, type => 'ping_ok', details => 'rtt_ms=1' }],
+			window_from => 0,
+			window_to => 3000,
+		};
+	},
+    });
+ok($home =~ /Signed in as admin/ && $home =~ m{action="/logout"}
+    && $home =~ /8\.0 Mbit\/s/ && $home =~ /aria-current="page"/
+    && $home =~ /href="\/\?range=24h"/ && $home =~ /a&lt;b/
+    && $home !~ /a<b/ && $home =~ /motors_stuck/
+    && $home =~ /class="series"/ && $home =~ m{<h2>Downlink},
+    'dashboard charts the stored samples');
 my $again = SLMON::Http::respond(http_req('GET', '/login',
     headers => { cookie => "slmon_session=$tok" }), $hctx);
 ok($again =~ m{\AHTTP/1.0 303 } && $again =~ m{Location: /},
@@ -353,6 +392,28 @@ my $limited = eval {
 ok($limited && $limited =~ m{\AHTTP/1.0 429 } && $limited =~ /Too many attempts/
     && $limited =~ /value="a&lt;b"/ && $limited !~ /value="a<b"/,
     'login form rate limit escapes the user field');
+
+my $svg = SLMON::Dash::chart_svg(
+	title => 'Downlink', unit => 'Mbit/s', from => 0, to => 100,
+	points => [ { t => 0, v => 0 }, { t => 100, v => 8 } ],
+);
+my ($pts) = $svg =~ /class="series" points="([^"]+)"/;
+my @ys = map { (split /,/, $_)[1] } split / /, ($pts // '');
+ok(@ys == 2 && $ys[0] > $ys[1], 'a higher sample sits higher on the chart');
+my $empty = SLMON::Dash::chart_svg(title => 'Downlink', from => 0, to => 10, points => []);
+ok($empty =~ /No samples in this window/, 'an empty window says so');
+my $raw = pack('f<*', -1, 1, 0, 1);
+my $map = SLMON::Dash::map_svg({
+	num_rows => 2, num_cols => 2, snr_b64 => MIME::Base64::encode_base64($raw, ''),
+});
+ok($map =~ /class="u"/ && $map =~ /class="c"/ && $map =~ /class="o"/,
+    'obstruction map marks unmeasured, clear, and blocked cells');
+ok(join(' ', SLMON::StatusMap::alert_names(2)) eq 'motors_stuck',
+    'alert bits decode to names');
+ok(SLMON::Dash::series_table('1h') eq 'metrics'
+    && SLMON::Dash::series_table('24h') eq 'metrics_minutely'
+    && SLMON::Dash::series_table('7d') eq 'metrics_hourly',
+    'chart window picks the rollup table');
 
 print "$n tests, $fail failed\n";
 exit($fail ? 1 : 0);

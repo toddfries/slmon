@@ -13,14 +13,11 @@
 .Op Fl l Ar host:port
 .Sh DESCRIPTION
 .Nm
-records samples from a Starlink dish and a few local health signals.
+records samples from a Starlink dish and a few local health signals,
+and serves them on its HTTP listener.
 It is an unofficial monitor.
 It is not a SpaceX program and it does not speak for the dish operator.
 .Pp
-Phase 1 stores history, status, obstruction samples, watchdog pings,
-and optional weather.
-Dashboards, graphs, exported tables, alert delivery, and a Perl-native
-gRPC client are not in this tree.
 The dish protocol is the public Device Handle service.
 .Pp
 The intended dish is bridged onto an
@@ -276,8 +273,22 @@ and a five-second read timeout.
 .It Cm GET /
 With no session, redirects to
 .Pa /login .
-With a session, returns a short HTML page of links to the latest row of
-each table, and a logout button.
+With a session, returns the dashboard: the latest sample, charts, the
+obstruction grid, and recent events.
+.Va range
+is
+.Li 1h ,
+.Li 6h
+.Pq the default ,
+.Li 24h ,
+or
+.Li 7d .
+One hour is drawn from status polls.
+Six and 24 hours use the per-minute rollup.
+Seven days uses the hourly rollup.
+The obstruction chart uses status polls for every range.
+A logout button posts to
+.Pa /logout .
 .It Cm GET /login
 The login form.
 A browser posts it to

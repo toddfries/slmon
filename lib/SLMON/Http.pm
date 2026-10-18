@@ -5,14 +5,11 @@ use warnings;
 
 use IO::Socket::INET;
 use JSON::PP ();
+use POSIX qw(strftime);
 use SLMON ();
 use SLMON::Auth;
+use SLMON::Dash;
 use SLMON::Imsg;
-
-my @TABLES = qw(
-	history_samples metrics metrics_minutely metrics_hourly metrics_daily
-	events dish_info obstruction_map weather speedtests alert_queue
-);
 
 sub _parse_form {
 	my ($s) = @_;
@@ -168,20 +165,6 @@ sub _login_page {
 	    . '<button type="submit">Log in</button></form>');
 }
 
-sub _home_page {
-	my ($user) = @_;
-	my $items = '';
-	for my $table (@TABLES) {
-		my $t = _he($table);
-		$items .= '<li><a href="/api/latest/' . $t . '">' . $t . '</a></li>';
-	}
-	return _page('slmon',
-	    '<h1>slmon</h1><p>Signed in as ' . _he($user) . '.</p>'
-	    . '<form method="post" action="/logout">'
-	    . '<button type="submit">Log out</button></form>'
-	    . '<h2>Latest row</h2><ul>' . $items . '</ul>');
-}
-
 sub _authed {
 	my ($req, $ctx) = @_;
 	my $cookie = _cookie($req->{headers}{cookie}, 'slmon_session');
@@ -254,6 +237,44 @@ sub _db_query {
 	return \@rows;
 }
 
+sub _dash_load {
+	my ($ctx, $range) = @_;
+	return $ctx->{dash}->($range) if ref $ctx->{dash} eq 'CODE';
+	my $now = $ctx->{now} // time;
+	my $sec = SLMON::Dash::range_seconds($range);
+	my $from = $now - $sec;
+	my $table = SLMON::Dash::series_table($range);
+	my $series = _db_query($ctx->{imsg}, {
+		op => 'raw', table => $table, from => $from, to => $now,
+		limit => 20000, order => 'asc',
+	});
+	# Obstruction is stored on status polls, not in the throughput rollup.
+	my $obstruction = $series;
+	if ($table ne 'metrics') {
+		$obstruction = _db_query($ctx->{imsg}, {
+			op => 'raw', table => 'metrics', from => $from, to => $now,
+			limit => 20000, order => 'asc',
+		});
+	}
+	my $latest = _db_query($ctx->{imsg}, { op => 'latest', table => 'metrics' });
+	my $info = _db_query($ctx->{imsg}, { op => 'latest', table => 'dish_info' });
+	my $events = _db_query($ctx->{imsg}, {
+		op => 'raw', table => 'events', from => $from, to => $now,
+		limit => 30, order => 'desc',
+	});
+	my $map = _db_query($ctx->{imsg}, { op => 'latest', table => 'obstruction_map' });
+	return {
+		series       => $series,
+		obstruction  => $obstruction,
+		latest       => $latest->[0],
+		info         => $info->[0],
+		events       => $events,
+		map          => $map->[0],
+		window_from  => $from,
+		window_to    => $now,
+	};
+}
+
 sub _db_login {
 	my ($imsg, $user, $pw) = @_;
 	$imsg->send(SLMON::IMSG_LOGIN, SLMON::json_encode({
@@ -279,7 +300,15 @@ sub respond {
 	if ($method eq 'GET' && $path eq '/') {
 		my $user = _authed($req, $ctx);
 		return _redirect('/login') if !defined $user;
-		return _html_response(200, _home_page($user));
+		my $range = SLMON::Dash::range_name($req->{query}{range});
+		my $data = eval { _dash_load($ctx, $range) };
+		if ($@) {
+			$data = { error => 'The database did not answer.' };
+		}
+		$data->{user} = $user;
+		$data->{range} = $range;
+		$data->{now} = $ctx->{now} // time;
+		return _html_response(200, SLMON::Dash::page($data));
 	}
 	if ($method eq 'POST' && $path eq '/logout') {
 		return _redirect('/login', _clear_cookie());
@@ -371,6 +400,8 @@ sub run {
 	my $doc = SLMON::json_decode($hello->{data}) || {};
 	my $secret = $doc->{session_secret} or die "slmon: http: session secret missing\n";
 	my $admin = $doc->{admin_user} // 'admin';
+	# localtime reads the zone file. Do it before the pledge locks the filesystem.
+	strftime('%H:%M', localtime($^T));
 	require OpenBSD::Pledge;
 	OpenBSD::Pledge::pledge('inet')
 	    or die "slmon: http pledge: $!\n";

@@ -44,6 +44,16 @@ sub alerts_bitfield {
 	return $bits;
 }
 
+sub alert_names {
+	my ($bits) = @_;
+	$bits = 0 if !defined $bits || $bits !~ /\A[0-9]+\z/;
+	my @names;
+	for my $name (sort { $ALERT_BIT{$a} <=> $ALERT_BIT{$b} } keys %ALERT_BIT) {
+		push @names, $name if $bits & (1 << $ALERT_BIT{$name});
+	}
+	return @names;
+}
+
 sub _num {
 	my ($v) = @_;
 	return undef if !defined $v;

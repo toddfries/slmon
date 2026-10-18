@@ -1,8 +1,8 @@
 # slmon
 
-Unofficial Starlink monitor. It is not affiliated with SpaceX. Phase 1 stores
-dish history, status, and a few local health signals. Dashboards, graphs,
-alerts, and a Perl-native gRPC client are later phases and are not built.
+Unofficial Starlink monitor. It is not affiliated with SpaceX. It records
+dish history, status, obstruction samples, and watchdog pings, and serves
+a dashboard of those samples.
 
 The dish in this setup is bridged to an OpenBSD firewall. The default
 `dish_host` is `192.168.100.1` port 9200. Override it in the config file
@@ -42,11 +42,12 @@ db = sqlite
 `./var/slmon.db`. Otherwise it is `~/.local/share/slmon/slmon.db`.
 
 `-l` overrides `listen`. The HTTP listener is loopback only unless you set
-otherwise. Open `http://127.0.0.1:8080/login` for the browser form. A
-successful login sets the `slmon_session` cookie and returns to `/`, which
-links the JSON tables. `GET /health` is open. `POST /api/login` is the same
-check for a client that wants JSON back. Everything under `/api/` except
-that login needs the cookie.
+otherwise. Open `http://127.0.0.1:8080/` for the dashboard. The login form
+is `http://127.0.0.1:8080/login`. A successful login sets the
+`slmon_session` cookie and returns to `/`. Charts cover 1 hour, 6 hours,
+24 hours, or 7 days (`/?range=1h`). `GET /health` is open.
+`POST /api/login` is the same check for a client that wants JSON back.
+Everything under `/api/` except that login needs the cookie.
 
 ## Processes
 
@@ -93,8 +94,12 @@ run with a pty password prompt and a fake dish. The PostgreSQL targets
 `initdb` a private cluster and remove it. The live-dish target runs
 `slmon once` only when `192.168.100.1:9200` answers.
 
-## Not in this tree
+## Dashboard
 
-Phase 2 would add the dashboard, graphs, CSV, sky view, health score, SLA,
-and alert delivery. Phase 3 would replace the linked gRPC client with Perl.
-Neither is implemented.
+`/` shows the latest downlink, uplink, latency, loss, obstruction, and
+uptime, then charts of those series. One hour uses status polls. Six and
+24 hours use the per-minute rollup. Seven days uses the hourly rollup.
+The obstruction chart uses status polls for every range.
+The obstruction grid is the newest map from the dish: gray is unmeasured,
+blue is clear, red is blocked. JSON for the same tables remains at
+`/api/latest/TABLE` and `/api/raw/TABLE`.
