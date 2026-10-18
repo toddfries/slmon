@@ -10,3 +10,4 @@ regress/**/*.log
 regress/ptyfeed
 regress/work/
 *.core
+ai.sh
