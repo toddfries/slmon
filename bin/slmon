@@ -1,0 +1,58 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use FindBin;
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../blib";
+
+use SLMON ();
+use SLMON::Config;
+use SLMON::Parent;
+
+sub usage {
+	die <<"END";
+usage: slmon start|init|status|once [-c file] [-d db] [-l host:port]
+END
+}
+
+my $cmd = shift @ARGV;
+usage() if !defined $cmd || $cmd =~ /\A-/;
+
+my ($file, $db, $listen);
+while (@ARGV) {
+	my $arg = shift @ARGV;
+	if ($arg eq '-c') {
+		$file = shift @ARGV;
+		die "slmon: -c needs a path\n" if !defined $file;
+	} elsif ($arg eq '-d') {
+		$db = shift @ARGV;
+		die "slmon: -d needs a path\n" if !defined $db;
+	} elsif ($arg eq '-l') {
+		$listen = shift @ARGV;
+		die "slmon: -l needs host:port\n" if !defined $listen;
+	} else {
+		die "slmon: unknown argument $arg\n";
+	}
+}
+
+my $root = "$FindBin::Bin/..";
+my $cfg = SLMON::Config::load_file($file);
+SLMON::Config::apply_paths($cfg,
+	db_path => $db,
+	listen  => $listen,
+	root    => $root,
+);
+
+if ($cmd eq 'start') {
+	SLMON::Parent::run($cfg);
+} elsif ($cmd eq 'init') {
+	SLMON::Parent::run($cfg, init_only => 1);
+} elsif ($cmd eq 'status') {
+	exit SLMON::Parent::status($cfg);
+} elsif ($cmd eq 'once') {
+	exit SLMON::Parent::once($cfg);
+} else {
+	usage();
+}
+
+exit 0;

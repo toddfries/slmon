@@ -1,0 +1,12 @@
+blib/
+var/
+*.o
+*.so
+ext/dishbridge/gen/
+ext/imsg/Imsg.c
+ext/dishbridge/Dish.c
+regress/**/obj/
+regress/**/*.log
+regress/ptyfeed
+regress/work/
+*.core
