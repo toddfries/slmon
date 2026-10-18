@@ -11,3 +11,4 @@ regress/ptyfeed
 regress/work/
 *.core
 ai.sh
+si/aibootstrap/

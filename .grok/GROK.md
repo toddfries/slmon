@@ -1,20 +1,9 @@
-# Project Instructions
+# Grok
 
-## Primary Instruction Source (Compact)
+Read `si/*.md` before changing this tree.
 
-The single source of truth for all agent behavior, project conventions, gotchas, workflows, and decision-making is the si:
+`si/slmon-cribnotes.md` is this repository. `si/slmon-plan.md` is parked and is not orders.
 
-**`si/*.md`** (at the project root)
+Shared rules are `si/aibootstrap/behavior.md` and `si/aibootstrap/values.md`. That directory is its own git repository. Do not add it to this repository's commits.
 
-- This file is intentionally more compact than a traditional `AGENTS.md` to reduce token usage.
-- **Always read `si/*.md`** at the start of any new session or before beginning a significant task / multi-step change.
-- Treat the rules and knowledge in `si/*.md` as higher priority than general defaults.
-- When the file is updated, re-read it before continuing work.
-- The human reviews all proposed changes to this file via diffs.
-
-## When Working
-
-- Follow the Prime Directive checklist in `si/*.md`.
-- Prefer minimal, style-matching diffs.
-- Update `si/*.md` (and related docs) when new behaviors, gotchas, or workflows are discovered.
-- Never commit operator artifacts (db files, scratch reports, etc.).
+Do not put project rules in this file.
