@@ -136,6 +136,7 @@ sub run {
 	my ($host, $port) = SLMON::Config::dish_endpoint($cfg);
 	my $target = "$host:$port";
 	my $interval = $cfg->{dish_interval_s} || 30;
+	$interval = SLMON::MIN_POLL_S if $interval < SLMON::MIN_POLL_S;
 	my $next = 0;
 	my $next_map = 0;
 	my $boot;
@@ -180,7 +181,7 @@ sub run {
 				my $mraw = SLMON::Dish::call($target, 'map');
 				my $mdoc = SLMON::json_decode($mraw);
 				$imsg->send(SLMON::IMSG_OBSTRUCTION, pack_map($mdoc, $now));
-				$next_map = $now + 300;
+				$next_map = $now + SLMON::MAP_POLL_S;
 			}
 		};
 		if ($@) {

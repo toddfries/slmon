@@ -110,6 +110,14 @@ ok($samples[2]{latency} == 8, 'partial drop keeps latency');
 
 my $cfg = SLMON::Config::parse('');
 ok($cfg->{dish_interval_s} == 30, 'default dish interval');
+eval { SLMON::Config::parse("dish_interval_s = 1\n") };
+ok($@ && $@ =~ /at least 2/, 'dish interval cannot be under 2 seconds');
+my $two = SLMON::Config::parse("dish_interval_s = 2\n");
+ok($two->{dish_interval_s} == 2, 'dish interval of 2 seconds is accepted');
+my $rev_a = SLMON::Http::page_rev($cfg);
+my $rev_b = SLMON::Http::page_rev($two);
+ok($rev_a =~ /\A[0-9a-f]{8}\z/ && $rev_b =~ /\A[0-9a-f]{8}\z/ && $rev_a ne $rev_b,
+    'page revision changes with the dish interval');
 ok($cfg->{dish_host} eq '192.168.100.1', 'default dish host');
 ok($cfg->{rollup_interval_s} == 60, 'default rollup interval');
 ok($cfg->{raw_retention_days} == 90, 'default raw retention');
@@ -416,6 +424,9 @@ my $form = SLMON::Http::respond(http_req('GET', '/login'), $hctx);
 ok($form =~ m{\AHTTP/1.0 200 } && $form =~ m{text/html}
     && $form =~ m{action="/login"} && $form =~ m{name="password"},
     'login form');
+ok($form =~ /setInterval\(check, 2000\)/ && $form !~ /id="live"/
+    && $form =~ /name="slmon-rev"/,
+    'login page checks for a newer revision');
 my $root = SLMON::Http::respond(http_req('GET', '/'), $hctx);
 ok($root =~ m{\AHTTP/1.0 303 } && $root =~ m{Location: /login},
     'root sends a browser to the login form');
@@ -463,6 +474,47 @@ ok($home =~ /Signed in as admin/ && $home =~ m{action="/logout"}
     && $home =~ /class="series"/ && $home =~ m{<h2>Downlink}
     && $home =~ m{<h2>Jitter},
     'dashboard charts the stored samples');
+ok($home =~ /id="live" data-drawn="/
+    && $home =~ /name="slmon-refresh" content="30"/
+    && $home =~ /Charts update every 30s/
+    && $home =~ /sample every 30s/
+    && $home =~ /setInterval\(check, 2000\)/
+    && $home =~ /j\.rev && rev && j\.rev !== rev/
+    && $home =~ /Obstruction map every 5 min/
+    && $home =~ /Listen 127\.0\.0\.1:8080/
+    && $home =~ /Database sqlite/
+    && $home =~ /raw 90 days/,
+    'dashboard shows config and redraws on the dish interval');
+my $fast_view = SLMON::Dash::view_from({
+    dish_interval_s => 4,
+    dish_host => '10.0.0.1:9201',
+    listen => '127.0.0.1:9',
+    db => 'pg',
+    raw_retention_days => 7,
+    minutely_retention_days => 8,
+    hourly_rollup_days => 9,
+});
+ok($fast_view->{chart_s} == 4 && $fast_view->{dish_port} == 9201, 'view follows config');
+ok(SLMON::Dash::view_from({ dish_interval_s => 1 })->{chart_s} == 2,
+    'chart interval stays at least 2s');
+my $fast_html = SLMON::Dash::page({
+    user => 'admin', view => $fast_view, rev => 'abcd1234', now => 100,
+});
+ok($fast_html =~ /sample every 4s/ && $fast_html =~ /Charts update every 4s/
+    && $fast_html =~ /10\.0\.0\.1:9201/
+    && $fast_html =~ /Listen 127\.0\.0\.1:9/
+    && $fast_html =~ /Database pg/ && $fast_html =~ /raw 7 days/
+    && $fast_html =~ /name="slmon-rev" content="abcd1234"/
+    && $fast_html =~ /name="slmon-refresh" content="4"/
+    && $fast_html =~ /setInterval\(advance, every \* 1000\)/,
+    'dashboard states a shorter dish interval');
+my $js = SLMON::Dash::live_script();
+ok($js =~ m{\A<script>} && $js =~ m{</script>\z} && $js !~ m{</script>.+</script>}s,
+    'the page script is one element');
+my $health = SLMON::Http::respond(http_req('GET', '/health'), { %$hctx, rev => 'abc' });
+ok($health =~ m{\AHTTP/1.0 200 } && $health =~ /Cache-Control: no-store/
+    && $health =~ /"ok":true/ && $health =~ /"rev":"abc"/,
+    'health reports the page revision');
 my $again = SLMON::Http::respond(http_req('GET', '/login',
     headers => { cookie => "slmon_session=$tok" }), $hctx);
 ok($again =~ m{\AHTTP/1.0 303 } && $again =~ m{Location: /},

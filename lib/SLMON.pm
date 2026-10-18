@@ -28,6 +28,9 @@ use constant {
 	IMSG_LOGIN        => 18,
 	IMSG_LOGIN_RESULT => 19,
 	IMSG_MAX          => 262144,
+	# Fastest dish poll and page timer. The default poll stays 30s.
+	MIN_POLL_S        => 2,
+	MAP_POLL_S        => 300,
 };
 
 my $JSON = JSON::PP->new->utf8->canonical->allow_nonref;

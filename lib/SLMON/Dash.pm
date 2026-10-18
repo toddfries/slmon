@@ -5,6 +5,8 @@ use warnings;
 
 use MIME::Base64 qw(decode_base64);
 use POSIX qw(strftime);
+use SLMON ();
+use SLMON::Config;
 use SLMON::StatusMap;
 
 my %RANGE = (
@@ -329,6 +331,117 @@ sub _stat {
 	    . _he($value) . '</b></div>';
 }
 
+sub _day {
+	my ($v, $default) = @_;
+	return $default if !defined $v || $v !~ /\A[0-9]+\z/;
+	return int($v);
+}
+
+sub _span {
+	my ($s) = @_;
+	$s = int($s // 0);
+	return int($s / 60) . ' min' if $s >= 60 && $s % 60 == 0;
+	return $s . 's';
+}
+
+# What the page is allowed to show. Secrets stay out.
+sub view_from {
+	my ($cfg) = @_;
+	$cfg = {} if ref $cfg ne 'HASH';
+	my $sample = $cfg->{dish_interval_s};
+	$sample = 30 if !defined $sample || $sample !~ /\A[0-9]+\z/;
+	$sample = int($sample);
+	$sample = SLMON::MIN_POLL_S if $sample < SLMON::MIN_POLL_S;
+	my $host = $cfg->{dish_host};
+	$host = '192.168.100.1' if !defined $host || $host eq '';
+	my ($dish_host, $dish_port) = SLMON::Config::dish_endpoint({ dish_host => $host });
+	my $db = $cfg->{db};
+	$db = 'sqlite' if !defined $db || ($db ne 'sqlite' && $db ne 'pg');
+	my $listen = $cfg->{listen};
+	$listen = '127.0.0.1:8080' if !defined $listen || $listen eq '';
+	return {
+		dish_host   => $dish_host,
+		dish_port   => $dish_port,
+		sample_s    => $sample,
+		chart_s     => $sample,
+		map_s       => SLMON::MAP_POLL_S,
+		db          => $db,
+		listen      => $listen,
+		raw_days    => _day($cfg->{raw_retention_days}, 90),
+		minute_days => _day($cfg->{minutely_retention_days}, 730),
+		hour_days   => _day($cfg->{hourly_rollup_days}, 365),
+	};
+}
+
+sub live_tags {
+	my ($rev, $refresh_s) = @_;
+	$rev //= '';
+	$refresh_s = 30 if !defined $refresh_s || $refresh_s !~ /\A[0-9]+\z/;
+	$refresh_s = int($refresh_s);
+	$refresh_s = SLMON::MIN_POLL_S if $refresh_s < SLMON::MIN_POLL_S;
+	return '<meta name="slmon-rev" content="' . _he($rev) . '">'
+	    . '<meta name="slmon-refresh" content="' . $refresh_s . '">';
+}
+
+# Reads the meta tags. Values are not interpolated into this text.
+# The body has no "</script" sequence.
+sub live_script {
+	my $js = <<'JS';
+(function () {
+  var revNode = document.querySelector('meta[name="slmon-rev"]');
+  var everyNode = document.querySelector('meta[name="slmon-refresh"]');
+  var rev = revNode ? (revNode.getAttribute('content') || '') : '';
+  var raw = everyNode ? (everyNode.getAttribute('content') || '') : '';
+  var every = parseInt(raw, 10);
+  if (!raw || isNaN(every)) every = 30;
+  if (every < 2) every = 2;
+  function check() {
+    fetch('/health', {cache: 'no-store', credentials: 'same-origin'})
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j && j.rev && rev && j.rev !== rev) location.reload();
+      })
+      .catch(function () {});
+  }
+  setInterval(check, 2000);
+  if (!document.getElementById('live')) return;
+  function advance() {
+    fetch(location.pathname + location.search, {cache: 'no-store', credentials: 'same-origin'})
+      .then(function (r) {
+        if (r.redirected || r.status === 401) {
+          location.assign('/login');
+          return null;
+        }
+        if (!r.ok) return null;
+        return r.text();
+      })
+      .then(function (html) {
+        if (!html) return;
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var nextRevNode = doc.querySelector('meta[name="slmon-rev"]');
+        var nextRev = nextRevNode ? (nextRevNode.getAttribute('content') || '') : '';
+        if (nextRev && rev && nextRev !== rev) {
+          location.reload();
+          return;
+        }
+        var next = doc.getElementById('live');
+        var cur = document.getElementById('live');
+        if (!next || !cur) {
+          if (doc.querySelector('form[action="/login"]')) location.assign('/login');
+          return;
+        }
+        cur.innerHTML = next.innerHTML;
+        var drawn = next.getAttribute('data-drawn');
+        if (drawn) cur.setAttribute('data-drawn', drawn);
+      })
+      .catch(function () {});
+  }
+  setInterval(advance, every * 1000);
+})();
+JS
+	return '<script>' . $js . '</script>';
+}
+
 sub page {
 	my ($d) = @_;
 	$d ||= {};
@@ -408,8 +521,25 @@ sub page {
 	my $loss = _num($latest->{ping_drop_rate});
 	my $ob = _num($latest->{obstr_fraction});
 	my $lat = _num($latest->{ping_latency_ms});
+	my $view = ref $d->{view} eq 'HASH' ? $d->{view} : view_from();
+	my $rev = defined $d->{rev} ? $d->{rev} : '';
+	my $drawn = int($now);
+	my $cadence = '<p class="note">Charts update every ' . int($view->{chart_s})
+	    . 's, the same cadence as dish samples.</p>';
+	my $cfghtml = '<section><h2>Configuration</h2><ul class="cfg">'
+	    . '<li>Dish ' . _he($view->{dish_host}) . ':' . int($view->{dish_port})
+	    . ', sample every ' . int($view->{sample_s}) . 's</li>'
+	    . '<li>Charts update every ' . int($view->{chart_s}) . 's</li>'
+	    . '<li>Obstruction map every ' . _span($view->{map_s}) . '</li>'
+	    . '<li>Listen ' . _he($view->{listen}) . '</li>'
+	    . '<li>Database ' . _he($view->{db}) . '</li>'
+	    . '<li>Retention: raw ' . int($view->{raw_days})
+	    . ' days, minutely ' . int($view->{minute_days})
+	    . ' days, hourly ' . int($view->{hour_days}) . ' days</li>'
+	    . '</ul></section>';
 	return '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
 	    . '<meta name="viewport" content="width=device-width, initial-scale=1">'
+	    . live_tags($rev, $view->{chart_s})
 	    . '<title>slmon</title><style>'
 	    . 'body{font:16px/1.45 ui-sans-serif,sans-serif;margin:1.5rem auto;'
 	    . 'max-width:64rem;padding:0 1rem;color:#1a1a1a;background:#fff}'
@@ -438,13 +568,17 @@ sub page {
 	    . 'svg.obstruction .o{fill:#9a3412;stroke:none}'
 	    . 'svg.obstruction .u{fill:#e6e6e6;stroke:none}'
 	    . '.error{color:#8a1f1f}'
+	    . '.cfg{padding-left:1.2rem;margin:0.4rem 0}'
+	    . '.cfg li{margin:0.15rem 0}'
 	    . 'button{font:inherit;padding:0.4rem 0.9rem}'
 	    . '</style></head><body><header><div><h1>slmon</h1>'
 	    . '<p class="who">Signed in as ' . _he($user) . '.</p></div>'
 	    . '<form method="post" action="/logout"><button type="submit">Log out</button></form>'
 	    . '</header>'
+	    . '<div id="live" data-drawn="' . $drawn . '">'
 	    . $err
 	    . '<nav class="ranges">' . join('', @nav) . '</nav>'
+	    . $cadence
 	    . $id
 	    . (@dish ? '<p class="note">' . _he(join(' · ', @dish)) . '</p>' : '')
 	    . $alert
@@ -461,6 +595,9 @@ sub page {
 	    . '<section class="charts">' . $charts . '</section>'
 	    . $map_html
 	    . '<section><h2>Events</h2>' . $ev . '</section>'
+	    . $cfghtml
+	    . '</div>'
+	    . live_script()
 	    . '</body></html>';
 }
 

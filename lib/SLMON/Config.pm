@@ -58,7 +58,8 @@ sub parse {
 		die "slmon: $k must be an integer\n" if $cfg{$k} !~ /\A[0-9]+\z/;
 		$cfg{$k} = int($cfg{$k});
 	}
-	die "slmon: dish_interval_s must be at least 1\n" if $cfg{dish_interval_s} < 1;
+	die "slmon: dish_interval_s must be at least " . SLMON::MIN_POLL_S . "\n"
+	    if $cfg{dish_interval_s} < SLMON::MIN_POLL_S;
 	die "slmon: rollup_interval_s must be at least 1\n" if $cfg{rollup_interval_s} < 1;
 	die "slmon: log_level must be info or debug\n"
 	    if $cfg{log_level} ne 'info' && $cfg{log_level} ne 'debug';

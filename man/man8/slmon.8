@@ -174,7 +174,7 @@ A suffix
 replaces the default port 9200.
 .It Va dish_interval_s
 .Li 30 .
-Minimum 1.
+Minimum 2.
 .It Va db
 .Li sqlite
 or
@@ -299,6 +299,26 @@ Jitter is the highest 1 Hz latency in the bucket minus the lowest,
 in milliseconds.
 The one-hour jitter chart uses the per-minute rollup.
 A longer range uses the jitter stored on the same rows as the other charts.
+The page lists the configuration it is using: the dish address, how often
+the dish is sampled, how often the charts redraw, the obstruction map
+interval, the listen address, the database, and the retention windows.
+The password and
+.Va pg_password
+are not shown.
+Charts redraw in place every
+.Va dish_interval_s
+seconds.
+That interval is at least 2 seconds and defaults to 30.
+The page asks
+.Pa /health
+every 2 seconds.
+When
+.Va rev
+in that reply differs from the page, the browser reloads.
+.Va rev
+is fixed when the HTTP process starts.
+It covers the page source and the configuration values the page shows.
+A newer file on disk is served after that process is restarted.
 A logout button posts to
 .Pa /logout .
 .It Cm GET /login
@@ -316,7 +336,13 @@ Clears the cookie and redirects to
 .Pa /login .
 .It Cm GET /health
 Open.
-Returns a small JSON object.
+Returns JSON with
+.Va ok
+and
+.Va rev .
+.Va rev
+is the page revision described above.
+The response is not cached.
 No cookie is required.
 .It Cm POST /api/login
 JSON or form body with

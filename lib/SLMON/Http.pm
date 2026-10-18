@@ -8,8 +8,46 @@ use JSON::PP ();
 use POSIX qw(strftime);
 use SLMON ();
 use SLMON::Auth;
+use SLMON::Config;
 use SLMON::Dash;
 use SLMON::Imsg;
+
+# Stat the page modules before pledge. After pledge this process cannot
+# see a newer file, so the revision is the one it started with.
+sub page_rev {
+	my ($cfg) = @_;
+	my $view = SLMON::Dash::view_from($cfg);
+	my $buf = join "\n",
+	    $view->{dish_host}, $view->{dish_port}, $view->{sample_s},
+	    $view->{chart_s}, $view->{map_s}, $view->{db}, $view->{listen},
+	    $view->{raw_days}, $view->{minute_days}, $view->{hour_days};
+	for my $mod (qw(SLMON/Dash.pm SLMON/Http.pm SLMON/Config.pm)) {
+		my $path = $INC{$mod} // '';
+		my ($size, $mtime) = (0, 0);
+		if ($path ne '' && -e $path) {
+			($size, $mtime) = (stat $path)[7, 9];
+		}
+		$buf .= "\n$mod $size $mtime";
+	}
+	return _fnv1a($buf);
+}
+
+sub _fnv1a {
+	my ($s) = @_;
+	my $h = 2166136261;
+	for my $c (unpack 'C*', $s) {
+		$h ^= $c;
+		$h = ($h * 16777619) & 0xffffffff;
+	}
+	return sprintf '%08x', $h;
+}
+
+sub _page_bits {
+	my ($ctx) = @_;
+	my $view = SLMON::Dash::view_from($ctx->{cfg});
+	my $rev = defined $ctx->{rev} ? $ctx->{rev} : '';
+	return ($rev, $view);
+}
 
 sub _parse_form {
 	my ($s) = @_;
@@ -133,9 +171,10 @@ sub _redirect {
 }
 
 sub _page {
-	my ($title, $inner) = @_;
+	my ($title, $inner, $rev, $refresh_s) = @_;
 	return '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
 	    . '<meta name="viewport" content="width=device-width, initial-scale=1">'
+	    . SLMON::Dash::live_tags($rev, $refresh_s)
 	    . '<title>' . _he($title) . '</title><style>'
 	    . 'body{font:16px/1.45 ui-sans-serif,sans-serif;margin:2rem auto;'
 	    . 'max-width:32rem;padding:0 1rem;color:#1a1a1a;background:#fff}'
@@ -146,11 +185,13 @@ sub _page {
 	    . 'button{font:inherit;padding:0.4rem 0.9rem}'
 	    . '.error{color:#8a1f1f}'
 	    . 'ul{padding-left:1.2rem}li{margin:0.25rem 0}'
-	    . '</style></head><body>' . $inner . '</body></html>';
+	    . '</style></head><body>' . $inner
+	    . SLMON::Dash::live_script()
+	    . '</body></html>';
 }
 
 sub _login_page {
-	my ($user, $error) = @_;
+	my ($user, $error, $rev, $refresh_s) = @_;
 	my $err = '';
 	if (defined $error && $error ne '') {
 		$err = '<p class="error">' . _he($error) . '</p>';
@@ -162,7 +203,8 @@ sub _login_page {
 	    . ' autocomplete="username" autofocus></label>'
 	    . '<label for="password">Password <input id="password" type="password" name="password"'
 	    . ' autocomplete="current-password"></label>'
-	    . '<button type="submit">Log in</button></form>');
+	    . '<button type="submit">Log in</button></form>',
+	    $rev, $refresh_s);
 }
 
 sub _authed {
@@ -308,11 +350,14 @@ sub respond {
 	my $method = $req->{method};
 	my $path = $req->{path};
 	if ($method eq 'GET' && $path eq '/health') {
-		return _json_response(200, { ok => JSON::PP::true });
+		my $rev = defined $ctx->{rev} ? $ctx->{rev} : '';
+		return _json_response(200, { ok => JSON::PP::true, rev => $rev },
+		    "Cache-Control: no-store\r\n");
 	}
 	if ($method eq 'GET' && $path eq '/login') {
 		return _redirect('/') if defined _authed($req, $ctx);
-		return _html_response(200, _login_page('', ''));
+		my ($rev, $view) = _page_bits($ctx);
+		return _html_response(200, _login_page('', '', $rev, $view->{chart_s}));
 	}
 	if ($method eq 'GET' && $path eq '/') {
 		my $user = _authed($req, $ctx);
@@ -325,6 +370,9 @@ sub respond {
 		$data->{user} = $user;
 		$data->{range} = $range;
 		$data->{now} = $ctx->{now} // time;
+		my ($rev, $view) = _page_bits($ctx);
+		$data->{view} = $view;
+		$data->{rev} = $rev;
 		return _html_response(200, SLMON::Dash::page($data));
 	}
 	if ($method eq 'POST' && $path eq '/logout') {
@@ -342,7 +390,8 @@ sub respond {
 			my $msg = $code == 429
 			    ? 'Too many attempts. Wait five minutes and try again.'
 			    : 'User or password is wrong.';
-			return _html_response($code, _login_page($tried, $msg));
+			my ($rev, $view) = _page_bits($ctx);
+			return _html_response($code, _login_page($tried, $msg, $rev, $view->{chart_s}));
 		}
 		if ($code == 200) {
 			return _json_response(200, { ok => JSON::PP::true, user => $user },
@@ -396,6 +445,8 @@ sub _handle_client {
 			ip        => $ip,
 			now       => time,
 			log_level => $cfg->{log_level} // 'info',
+			cfg       => $cfg,
+			rev       => $cfg->{page_rev} // '',
 		});
 	};
 	if ($@) {
@@ -418,6 +469,7 @@ sub run {
 	my $doc = SLMON::json_decode($hello->{data}) || {};
 	my $secret = $doc->{session_secret} or die "slmon: http: session secret missing\n";
 	my $admin = $doc->{admin_user} // 'admin';
+	$cfg->{page_rev} = page_rev($cfg);
 	# localtime reads the zone file. Do it before the pledge locks the filesystem.
 	strftime('%H:%M', localtime($^T));
 	require OpenBSD::Pledge;

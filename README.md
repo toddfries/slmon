@@ -105,5 +105,11 @@ when the rollup has no obstruction yet. Jitter is the spread of the 1 Hz
 latencies in the bucket (highest minus lowest). The one-hour jitter chart
 reads the per-minute rollup.
 The obstruction grid is the newest map from the dish: gray is unmeasured,
-blue is clear, red is blocked. JSON for the same tables remains at
-`/api/latest/TABLE` and `/api/raw/TABLE`.
+blue is clear, red is blocked. The page also lists the configuration it
+is using (dish address, sample interval, chart interval, map interval,
+listen address, database, retention). It does not show the password or
+`pg_password`. Charts redraw in place on `dish_interval_s` (default 30
+seconds, minimum 2). The page asks `GET /health` every 2 seconds and
+reloads when `rev` changes. That revision is taken when the HTTP process
+starts, so a newer file is served after that process is restarted. JSON
+for the same tables remains at `/api/latest/TABLE` and `/api/raw/TABLE`.

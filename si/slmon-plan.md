@@ -8,7 +8,7 @@ Phase 1 is shipped and collecting. Commit `87a4e17` added the first dashboard: l
 
 Man pages and the README describe the tool as it is when a change lands. They do not carry this phase list.
 
-Still in force: no Docker, dish stays `192.168.100.1:9200`, the http child does not open the database, one admin, read RPCs only. UI stays inline HTML and SVG from Perl. The shared handbook is `si/aibootstrap/`. `aihandbook` is a future name for that directory, not a path.
+Still in force: no Docker, dish stays `192.168.100.1:9200`, the http child does not open the database, one admin, read RPCs only. UI stays inline HTML, SVG, and script from Perl. No static files and no CDN. The shared handbook is `si/aibootstrap/`. `aihandbook` is a future name for that directory, not a path.
 
 ## Decisions that bind every phase
 
@@ -20,7 +20,7 @@ These apply to the whole plan. A later phase does not invent a second window set
 
 Each window reads the finest tier that still covers it. `24h` prefers minutely rows. `7d` and `30d` prefer hourly rows. `365d` and `ever` prefer daily rows and use hourly rows where the day has not been rolled yet. Obstruction and jitter have to be on those rows, or the long windows are blank.
 
-**Refresh.** Every panel has its own reload interval. A panel is its own authenticated document, embedded in an iframe, with a refresh meta tag. One panel reloads without a script and without reloading the page. `panel_refresh_s` (default 60) applies to every panel. `panel_refresh_<panel>_s` overrides it. Values are seconds, from 15 to 3600. A panel URL may pass `refresh=` inside those bounds; otherwise the config wins. Refresh rereads the database. It does not change `dish_interval_s` or the five-minute map poll. A panel added in any later step gets its refresh key in that same change. The series, the map, the sky, the calendar, the health score, the SLA block, the weather card, and the event list are all panels.
+**Refresh.** Graphs redraw in place on `dish_interval_s` (default 30, minimum 2). The page asks `GET /health` every 2 seconds and reloads when `rev` changes. `rev` is the running page plus the configuration that affects it, taken at process start. A file change on disk is served after that process is restarted. Refresh rereads the database. It does not change `dish_interval_s` or the five-minute map poll. Later panels join that same interval and revision check. They do not grow a second timer under 2 seconds, and they do not grow a `panel_refresh_*` key. The series, the map, the sky, the calendar, the health score, the SLA block, the weather card, and the event list all use this rule.
 
 **Hooks.** A new output is a plugin. Modules live under `lib/SLMON/Notify/`. Config `notify` is a comma list, default empty. The first hook is `event`. Example send paths are `dbus`, `email`, and `discord`. A later hook or send path is a new module plus a name on that list. Phases 3, 4, and 5 raise events. They do not grow a private sender. The queue payload is the event (timestamp, type, duration, text). Plugins do not get a database handle. The contract is the manual, written in the same change as the first modules, so another person can add a mechanism without reading those modules as the spec.
 
@@ -48,7 +48,7 @@ Build in this order. Each step is usable before the next one starts. Windows, re
 
 2. **Sections, one page, one window.** Overview (what is there now), Quality (loss, latency, jitter), Throughput, Dish (identity, azimuth, elevation, SNR, alerts, grid), History (events). The window control is `24h`, `7d`, `30d`, `365d`, and `ever`. No tab framework.
 
-3. **Refresh on the panels that exist.** Wire the series, the map, and the event list to the refresh rule. Sky, calendar, health, SLA, and weather join that rule in the step that adds them.
+3. **Refresh on the panels that exist.** Done for the current page: the series, the map, and the event list redraw in place on `dish_interval_s`, and the page reloads when `GET /health` reports a new `rev`. Sky, calendar, health, SLA, and weather join that same interval and revision check in the step that adds them.
 
 4. **Sky and calendar.** A sky view places the boresight on the stored obstruction grid. An outage calendar is one SVG drawn from `events` for the selected window.
 
