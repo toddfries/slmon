@@ -1,1 +1,0 @@
-rules/GROK.md
