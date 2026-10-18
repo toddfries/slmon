@@ -2,7 +2,7 @@
 
 2026-10-18. The tool described here is commit `87a4e17`. Read this file before changing the tree.
 
-Shared rules are `si/aibootstrap/behavior.md` and `si/aibootstrap/values.md`. This file overrides them for slmon. `si/aibootstrap` is a separate git repository. Do not add it to slmon's commits.
+Shared rules are `si/aibootstrap/behavior.md` and `si/aibootstrap/values.md`. This file overrides them for slmon. `si/aibootstrap` is a separate git repository. Do not add it to slmon's commits. `aihandbook` is a future name for that handbook, not a directory. The handbook text also says a later rename may be `sihandbook/`. Until a rename is on disk, read `si/aibootstrap/`.
 
 `man/man8/slmon.8` and `README.md` describe the tool as it runs. They do not describe phases or this conversation. Later-phase ideas are parked in `si/slmon-plan.md`. Do not implement that file until asked.
 
