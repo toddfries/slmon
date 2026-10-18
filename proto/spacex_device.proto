@@ -3,7 +3,8 @@
 // of any third-party proto tree.
 syntax = "proto3";
 
-package spacex.api.device;
+// The dish registers SpaceX.API.Device.Device. The lowercase form is rejected.
+package SpaceX.API.Device;
 
 service Device {
   rpc Handle (Request) returns (Response);

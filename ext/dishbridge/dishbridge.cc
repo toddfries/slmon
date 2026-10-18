@@ -15,7 +15,7 @@
 namespace {
 
 std::shared_ptr<grpc::Channel> g_channel;
-std::unique_ptr<spacex::api::device::Device::Stub> g_stub;
+std::unique_ptr<SpaceX::API::Device::Device::Stub> g_stub;
 std::string g_target;
 
 void
@@ -37,7 +37,7 @@ ensure_channel(const std::string &target, std::string &err)
 		err = "CreateChannel failed";
 		return -1;
 	}
-	g_stub = spacex::api::device::Device::NewStub(g_channel);
+	g_stub = SpaceX::API::Device::Device::NewStub(g_channel);
 	g_target = target;
 	return 0;
 }
@@ -93,7 +93,7 @@ legacy_state(const google::protobuf::Message &msg)
 }
 
 std::string
-status_json(const spacex::api::device::DishGetStatusResponse &st)
+status_json(const SpaceX::API::Device::DishGetStatusResponse &st)
 {
 	const auto &info = st.device_info();
 	const auto &dev = st.device_state();
@@ -183,7 +183,7 @@ jfloats(std::ostream &o, const google::protobuf::RepeatedField<float> &v)
 }
 
 std::string
-history_json(const spacex::api::device::DishGetHistoryResponse &h)
+history_json(const SpaceX::API::Device::DishGetHistoryResponse &h)
 {
 	std::ostringstream o;
 	o << "{\"current\":" << h.current();
@@ -211,7 +211,7 @@ history_json(const spacex::api::device::DishGetHistoryResponse &h)
 }
 
 std::string
-map_json(const spacex::api::device::DishGetObstructionMapResponse &m)
+map_json(const SpaceX::API::Device::DishGetObstructionMapResponse &m)
 {
 	std::ostringstream o;
 	o << "{\"num_rows\":" << m.num_rows();
@@ -223,11 +223,11 @@ map_json(const spacex::api::device::DishGetObstructionMapResponse &m)
 }
 
 int
-rpc(const char *op, spacex::api::device::Response &resp, std::string &err)
+rpc(const char *op, SpaceX::API::Device::Response &resp, std::string &err)
 {
 	grpc::ClientContext ctx;
 	ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
-	spacex::api::device::Request req;
+	SpaceX::API::Device::Request req;
 	if (std::strcmp(op, "status") == 0)
 		req.mutable_get_status();
 	else if (std::strcmp(op, "history") == 0)
@@ -263,7 +263,7 @@ slmon_dish_call(const char *target, const char *op, char **out, char **err)
 		*err = strdup(e.c_str());
 		return -1;
 	}
-	spacex::api::device::Response resp;
+	SpaceX::API::Device::Response resp;
 	if (rpc(op, resp, e) != 0) {
 		*err = strdup(e.c_str());
 		return -1;
