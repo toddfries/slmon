@@ -59,7 +59,33 @@ sub _wait {
 
 sub _try_pledge {
 	require OpenBSD::Pledge;
-	if (!OpenBSD::Pledge::pledge(qw(inet dns prot_exec))) {
+	require OpenBSD::Unveil;
+	# c-ares opens resolver files itself, so the dns promise's libc
+	# whitelist does not cover them. Abseil also probes a Linux sysfs
+	# path that is absent here; rpath lets that open return ENOENT
+	# instead of killing the process. The unveil list is the rest of
+	# what this child may read.
+	my @read = (
+		'/dev/urandom',
+		'/etc/resolv.conf',
+		'/etc/hosts',
+		'/etc/services',
+		'/etc/protocols',
+		'/etc/nsswitch.conf',
+		'/etc/netsvc.conf',
+		'/etc/svc.conf',
+	);
+	for my $path (@read) {
+		if (!OpenBSD::Unveil::unveil($path, 'r')) {
+			warn "slmon: dish unveil $path: $! (left unpledged)\n";
+			return;
+		}
+	}
+	if (!OpenBSD::Unveil::unveil()) {
+		warn "slmon: dish unveil lock: $! (left unpledged)\n";
+		return;
+	}
+	if (!OpenBSD::Pledge::pledge(qw(inet dns prot_exec rpath))) {
 		warn "slmon: dish pledge failed: $! (left unpledged)\n";
 	}
 	return;

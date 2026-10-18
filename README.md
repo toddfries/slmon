@@ -14,6 +14,8 @@ is the LAN gateway, and a poll of TCP port 9200 does not answer). `slmon once`
 says so and returns. Point a route at the dish, or set `dish_host`, before
 expecting live samples.
 
+The manual is `man/man8/slmon.8` (`mandoc man/man8/slmon.8`).
+
 ## Run
 
 ```

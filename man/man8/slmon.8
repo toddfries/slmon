@@ -1,0 +1,371 @@
+.\"
+.Dd $Mdocdate: October 18 2026 $
+.Dt SLMON 8
+.Os
+.Sh NAME
+.Nm slmon
+.Nd Starlink dish monitor
+.Sh SYNOPSIS
+.Nm slmon
+.Ar command
+.Op Fl c Ar file
+.Op Fl d Ar db
+.Op Fl l Ar host:port
+.Sh DESCRIPTION
+.Nm
+records samples from a Starlink dish and a few local health signals.
+It is an unofficial monitor.
+It is not a SpaceX program and it does not speak for the dish operator.
+.Pp
+Phase 1 stores history, status, obstruction samples, watchdog pings,
+and optional weather.
+Dashboards, graphs, exported tables, alert delivery, and a Perl-native
+gRPC client are not in this tree.
+The dish protocol is the public Device Handle service.
+.Pp
+The intended dish is bridged onto an
+.Ox
+firewall.
+It is not routing the LAN, so the stock address
+.Li 192.168.100.1
+does not apply and
+.Nm
+does not fall back to it.
+The default dish address is
+.Li 100.69.0.1
+port 9200.
+A host with no route to that address must set
+.Va dish_host
+or add a route before live samples will appear.
+.Nm once
+prints a one-line refusal and returns when that port does not answer.
+.Pp
+.Ar command
+is one of:
+.Bl -tag -width status
+.It Cm start
+Run the monitor in the foreground until
+.Dv SIGTERM ,
+.Dv SIGINT ,
+or
+.Dv SIGHUP .
+The first start against an empty database prompts for an admin user and
+password when standard input is a terminal.
+.It Cm init
+Prompt for the admin user and password, store them, and exit.
+A second
+.Cm init
+prints that the database is already initialized and does not change the
+password.
+.It Cm status
+Print whether the database is initialized, which driver is configured,
+the dish host, the HTTP port, and how many history samples are stored.
+This opens the database read-only in a separate process.
+.It Cm once
+Probe the dish once and print one status document as JSON.
+This does not start the daemon and does not write the database.
+.El
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl c Ar file
+Read configuration from
+.Ar file .
+The file is
+.Li key = value
+lines.
+Blank lines and lines whose first non-whitespace character is
+.Ql #
+are ignored.
+Unknown keys are rejected.
+.It Fl d Ar db
+SQLite database file.
+Overrides
+.Ev SLMON_DB
+and the default path.
+The directory of this file also holds
+.Pa http.port .
+.It Fl l Ar host:port
+HTTP listen address.
+Overrides the
+.Va listen
+key.
+Port 0 asks the kernel for a free port; the chosen port is written to
+.Pa http.port .
+.El
+.Sh PROCESSES
+.Nm
+follows the shape of an
+.Ox
+.Xr imsg_init 3
+daemon.
+The parent forks the children and restarts a child that exits.
+If the database child exits, the parent kills the others and exits
+non-zero so that
+.Xr rc 8
+can restart the whole monitor.
+A child that dies within two seconds of starting is restarted after a
+one-second pause.
+.Pp
+Process titles are
+.Li slmon: parent ,
+.Li slmon: dish ,
+.Li slmon: db ,
+.Li slmon: http ,
+.Li slmon: watchdog ,
+and, when coordinates are configured,
+.Li slmon: weather .
+Each child is pledged to the promises it needs.
+The parent keeps a wider pledge so a restarted child can still narrow
+itself, including
+.Xr unveil 2 .
+.Bl -tag -width watchdog
+.It parent
+Supervises children.
+It does not open the database.
+.It dish
+The only process that loads
+.Li libgrpc++ .
+It is forked before that library is loaded, and it never forks again.
+Every
+.Va dish_interval_s
+seconds (default 30) it calls
+.Fn get_status
+and
+.Fn get_history .
+The history ring is one sample per second.
+The obstruction map is fetched every five minutes.
+Each RPC deadline is five seconds.
+The channel is plaintext on port 9200.
+.It db
+The only process that writes the database.
+Other processes send it messages and read rows back the same way.
+.It http
+Serves the loopback HTTP API.
+The parent binds the listen socket and passes it in, so a restarted
+HTTP process keeps the same port.
+.It watchdog
+Runs
+.Xr ping 8
+.Fl n Fl c Cm 1 Fl w Cm 2
+against
+.Va ping_targets .
+Three failures in a row record a disconnect.
+A later success records how long the disconnect lasted.
+A latency spike is the best round-trip time above
+.Va spike_ms
+for at least
+.Va spike_min_s .
+.It weather
+Started only when both
+.Va latitude
+and
+.Va longitude
+are set.
+It reads the Open-Meteo forecast over HTTPS.
+Sending those warnings onward is not implemented.
+.El
+.Sh CONFIGURATION
+Keys and their defaults:
+.Bl -tag -width "minutely_retention_days"
+.It Va listen
+.Li 127.0.0.1:8080 .
+Must be
+.Li host:port .
+.It Va dish_host
+.Li 100.69.0.1 .
+A suffix
+.Li :port
+replaces the default port 9200.
+.It Va dish_interval_s
+.Li 30 .
+Minimum 1.
+.It Va db
+.Li sqlite
+or
+.Li pg .
+.It Va pg_host , Va pg_port , Va pg_db , Va pg_user , Va pg_password
+PostgreSQL connection.
+.Va pg_host
+is the directory of the local socket when it begins with a slash.
+.Va db No = Li pg
+requires
+.Va pg_db .
+.It Va latitude , Va longitude
+Decimal degrees.
+Set both or neither.
+Setting both starts the weather process.
+.It Va raw_retention_days
+.Li 90 .
+Raw history and status rows older than this are folded into hourly rows
+and then deleted.
+.It Va hourly_rollup_days
+.Li 365 .
+Hourly rows older than this are folded into daily rows and then deleted.
+.It Va minutely_retention_days
+.Li 730 .
+Per-minute rows older than this are deleted.
+.It Va rollup_interval_s
+.Li 60 .
+How often completed minutes, hours, and days are rolled up.
+Minimum 1.
+.It Va ping_targets
+.Li 1.1.1.1,8.8.8.8 .
+Comma-separated hosts.
+.It Va ping_interval_s
+.Li 10 .
+.It Va disconnect_failures
+.Li 3 .
+.It Va spike_ms
+.Li 200 .
+.It Va spike_min_s
+.Li 30 .
+.El
+.Pp
+A sample file:
+.Bd -literal -offset indent
+listen = 127.0.0.1:8080
+dish_host = 100.69.0.1
+dish_interval_s = 30
+db = sqlite
+.Ed
+.Pp
+PostgreSQL instead of SQLite:
+.Bd -literal -offset indent
+db = pg
+pg_db = slmon
+pg_user = slmon
+pg_host = /var/run/postgresql
+.Ed
+.Sh FIRST START
+.Cm init ,
+or
+.Cm start
+on a terminal, asks:
+.Bd -literal -offset indent
+Admin user [admin]:
+Password:
+Repeat password:
+.Ed
+.Pp
+An empty user name stores
+.Li admin .
+The password is read with echo off, must be at least 8 characters, and
+must be entered the same way twice.
+It is stored with
+.Xr crypt 3
+bcrypt
+.Pq Li $2b$ .
+A 32-byte session key is read from
+.Pa /dev/urandom
+once and reused on later starts.
+.Pp
+.Cm start
+with no password stored, and with standard input not a terminal, exits
+with the message:
+.Bd -literal -offset indent
+slmon: no admin password is set. Run `slmon init` or `slmon start` from a terminal.
+.Ed
+.Pp
+A later
+.Cm start
+does not prompt again.
+.Sh HTTP
+The listener is one request per connection, with
+.Li Connection: close
+and a five-second read timeout.
+.Bl -tag -width Ds
+.It Cm GET /health
+Open.
+Returns a small JSON object.
+No cookie is required.
+.It Cm POST /api/login
+JSON or form body with
+.Va user
+.Pq or Va username
+and
+.Va password .
+Success sets the cookie
+.Va slmon_session
+for 12 hours,
+.Li HttpOnly ,
+.Li SameSite=Lax .
+Five failures from one address in five minutes are rejected.
+A success clears that counter.
+The password hash stays in the database process.
+.It Cm POST /api/logout
+Clears the cookie.
+.It Cm GET /api/latest/ Ns Ar table
+The newest row of an allowed table.
+Requires the admin session cookie.
+.It Cm GET /api/raw/ Ns Ar table Ns ?from&to&limit&order
+Rows in a time range.
+.Va limit
+defaults to 5000 and is clamped to 50000.
+.Va order
+is
+.Li asc
+or
+.Li desc .
+.El
+.Pp
+Allowed tables are
+.Li history_samples ,
+.Li metrics ,
+.Li metrics_minutely ,
+.Li metrics_hourly ,
+.Li metrics_daily ,
+.Li events ,
+.Li dish_info ,
+.Li obstruction_map ,
+.Li weather ,
+.Li speedtests ,
+and
+.Li alert_queue .
+There is no HTML interface and no delete request.
+.Sh FILES
+.Bl -tag -width Ds
+.It Pa ./var/slmon.db
+Default SQLite file when
+.Nm
+is run from a checkout that contains
+.Pa lib/SLMON.pm .
+Mode 0600.
+SQLite is used in WAL mode.
+.It Pa ~/.local/share/slmon/slmon.db
+Default SQLite file otherwise.
+.It Pa http.port
+Text file next to the SQLite database, holding the HTTP port.
+.It Pa /etc/slmon.conf
+Path used by the sample
+.Pa rc.d/slmon
+script.
+That script is an example; its
+.Va daemon
+path must be edited before install.
+.El
+.Pp
+.Ev SLMON_DB
+selects the SQLite file when
+.Fl d
+is not given.
+.Sh EXIT STATUS
+.Cm start
+runs until a signal.
+It exits non-zero if the database child dies or if it is started
+non-interactively before a password has been set.
+.Cm init
+exits non-zero if the prompt cannot be read.
+.Cm status
+exits non-zero when the database cannot be opened.
+.Cm once
+exits 0 after printing status JSON, and also exits 0 when the dish port
+does not answer.
+The refusal is printed on standard error.
+.Sh SEE ALSO
+.Xr pledge 2 ,
+.Xr unveil 2 ,
+.Xr crypt 3 ,
+.Xr imsg_init 3 ,
+.Xr ping 8 ,
+.Xr rc 8

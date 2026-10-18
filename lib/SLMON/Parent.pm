@@ -138,9 +138,11 @@ sub _kill_workers {
 
 sub _pledge_parent {
 	require OpenBSD::Pledge;
+	# unveil stays in the superset so a restarted child can still
+	# narrow its own view. The parent itself does not call unveil.
 	OpenBSD::Pledge::pledge(qw(
 	    proc exec rpath wpath cpath inet dns flock
-	    sendfd recvfd unix prot_exec
+	    sendfd recvfd unix prot_exec unveil
 	)) or die "slmon: parent pledge: $!\n";
 	return;
 }

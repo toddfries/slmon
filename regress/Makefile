@@ -1,4 +1,4 @@
-REGRESS_TARGETS = run-unit run-imsg run-db-sqlite run-db-pg \
+REGRESS_TARGETS = run-unit run-imsg run-dish-pledge run-db-sqlite run-db-pg \
 	run-e2e-sqlite run-e2e-pg run-live
 
 PERL = /usr/bin/perl
@@ -15,6 +15,9 @@ run-unit:
 
 run-imsg:
 	cd ${ROOT} && PERL5LIB=lib:blib ${PERL} regress/imsg.pl
+
+run-dish-pledge:
+	cd ${ROOT} && PERL5LIB=lib:blib ${PERL} regress/dishpledge.pl
 
 run-db-sqlite:
 	cd ${ROOT} && ${PERL} regress/db.pl sqlite
