@@ -42,8 +42,11 @@ db = sqlite
 `./var/slmon.db`. Otherwise it is `~/.local/share/slmon/slmon.db`.
 
 `-l` overrides `listen`. The HTTP listener is loopback only unless you set
-otherwise. `GET /health` is open. Everything under `/api/` needs the
-`slmon_session` cookie from `POST /api/login`.
+otherwise. Open `http://127.0.0.1:8080/login` for the browser form. A
+successful login sets the `slmon_session` cookie and returns to `/`, which
+links the JSON tables. `GET /health` is open. `POST /api/login` is the same
+check for a client that wants JSON back. Everything under `/api/` except
+that login needs the cookie.
 
 ## Processes
 

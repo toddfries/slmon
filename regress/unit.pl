@@ -5,11 +5,12 @@ use warnings;
 use File::Path qw(remove_tree);
 use FindBin;
 
-use lib "$FindBin::Bin/../lib";
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../blib";
 use SLMON ();
 use SLMON::Auth;
 use SLMON::Config;
 use SLMON::DB;
+use SLMON::Http;
 use SLMON::History;
 use SLMON::Obstruction;
 use SLMON::Watchdog;
@@ -290,6 +291,68 @@ ok(SLMON::Weather::warning(wmo_code => 95, wind_kmh => 1) =~ /thunderstorm/, 'th
 ok(SLMON::Weather::warning(wmo_code => 75, wind_kmh => 1) =~ /heavy snow/, 'heavy snow');
 ok(SLMON::Weather::warning(wmo_code => 0, wind_kmh => 50) =~ /high wind/, 'high wind');
 ok(!defined SLMON::Weather::warning(wmo_code => 0, wind_kmh => 10), 'clear sample');
+
+sub http_req {
+	my ($method, $path, %opt) = @_;
+	return {
+		method  => $method,
+		path    => $path,
+		query   => {},
+		headers => $opt{headers} || {},
+		body    => $opt{body} // '',
+	};
+}
+
+my $hctx = {
+	secret => $secret,
+	admin  => 'admin',
+	rate   => SLMON::Auth::rate_new(),
+	ip     => '127.0.0.1',
+	now    => time,
+};
+my $form = SLMON::Http::respond(http_req('GET', '/login'), $hctx);
+ok($form =~ m{\AHTTP/1.0 200 } && $form =~ m{text/html}
+    && $form =~ m{action="/login"} && $form =~ m{name="password"},
+    'login form');
+my $root = SLMON::Http::respond(http_req('GET', '/'), $hctx);
+ok($root =~ m{\AHTTP/1.0 303 } && $root =~ m{Location: /login},
+    'root sends a browser to the login form');
+my $tok = SLMON::Auth::sign_session('admin', time + 3600, $secret);
+my $home = SLMON::Http::respond(http_req('GET', '/',
+    headers => { cookie => "slmon_session=$tok" }), $hctx);
+ok($home =~ /Signed in as admin/ && $home =~ m{/api/latest/history_samples}
+    && $home =~ m{action="/logout"},
+    'home after login');
+my $again = SLMON::Http::respond(http_req('GET', '/login',
+    headers => { cookie => "slmon_session=$tok" }), $hctx);
+ok($again =~ m{\AHTTP/1.0 303 } && $again =~ m{Location: /},
+    'login form redirects when already signed in');
+my $out = SLMON::Http::respond(http_req('POST', '/logout'), $hctx);
+ok($out =~ m{\AHTTP/1.0 303 } && $out =~ m{Location: /login}
+    && $out =~ /Max-Age=0/,
+    'logout clears the cookie');
+my $ugly = SLMON::Auth::sign_session('a<b"c', time + 3600, $secret);
+my $escaped = SLMON::Http::respond(http_req('GET', '/',
+    headers => { cookie => "slmon_session=$ugly" }), {
+	%$hctx,
+	admin => 'a<b"c',
+    });
+ok($escaped =~ /a&lt;b&quot;c/ && $escaped !~ /a<b"c/,
+    'home escapes the signed-in name');
+my $limited_rate = SLMON::Auth::rate_new();
+SLMON::Auth::rate_fail($limited_rate, '10.9.9.9', $hctx->{now}) for 1 .. 5;
+my $limited = eval {
+	SLMON::Http::respond(http_req('POST', '/login',
+	    headers => { 'content-type' => 'application/x-www-form-urlencoded' },
+	    body => 'user=a<b&password=secret'), {
+		%$hctx,
+		rate => $limited_rate,
+		ip   => '10.9.9.9',
+	});
+};
+ok($limited && $limited =~ m{\AHTTP/1.0 429 } && $limited =~ /Too many attempts/
+    && $limited =~ /value="a&lt;b"/ && $limited !~ /value="a<b"/,
+    'login form rate limit escapes the user field');
 
 print "$n tests, $fail failed\n";
 exit($fail ? 1 : 0);

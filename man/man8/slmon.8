@@ -273,6 +273,24 @@ The listener is one request per connection, with
 .Li Connection: close
 and a five-second read timeout.
 .Bl -tag -width Ds
+.It Cm GET /
+With no session, redirects to
+.Pa /login .
+With a session, returns a short HTML page of links to the latest row of
+each table, and a logout button.
+.It Cm GET /login
+The login form.
+A browser posts it to
+.Pa /login .
+.It Cm POST /login
+The same user and password fields as
+.Pa /api/login .
+Success sets the cookie and redirects to
+.Pa / .
+Failure renders the form again.
+.It Cm POST /logout
+Clears the cookie and redirects to
+.Pa /login .
 .It Cm GET /health
 Open.
 Returns a small JSON object.
@@ -320,7 +338,7 @@ Allowed tables are
 .Li speedtests ,
 and
 .Li alert_queue .
-There is no HTML interface and no delete request.
+There is no delete request.
 .Sh FILES
 .Bl -tag -width Ds
 .It Pa ./var/slmon.db
