@@ -106,7 +106,7 @@ ok($samples[2]{latency} == 8, 'partial drop keeps latency');
 
 my $cfg = SLMON::Config::parse('');
 ok($cfg->{dish_interval_s} == 30, 'default dish interval');
-ok($cfg->{dish_host} eq '100.69.0.1', 'default dish host');
+ok($cfg->{dish_host} eq '192.168.100.1', 'default dish host');
 ok($cfg->{rollup_interval_s} == 60, 'default rollup interval');
 ok($cfg->{raw_retention_days} == 90, 'default raw retention');
 eval { SLMON::Config::parse("nope = 1\n") };

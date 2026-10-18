@@ -32,11 +32,11 @@ run-e2e-pg: ptyfeed
 	cd ${ROOT} && PERL5LIB=lib:blib ${PERL} regress/e2e.pl pg
 
 run-live:
-	@if nc -z -w 2 100.69.0.1 9200; then \
+	@if nc -z -w 2 192.168.100.1 9200; then \
 		cd ${ROOT} && PERL5LIB=lib:blib ${PERL} bin/slmon once \
 		    | grep '"status"'; \
 	else \
-		echo "SKIP live dish: 100.69.0.1:9200 does not answer (no route from this host)" >&2; \
+		echo "SKIP live dish: 192.168.100.1:9200 does not answer" >&2; \
 	fi
 
 .include <bsd.regress.mk>

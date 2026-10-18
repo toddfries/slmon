@@ -7,7 +7,7 @@ use SLMON ();
 
 my %DEFAULT = (
 	listen                  => '127.0.0.1:8080',
-	dish_host               => '100.69.0.1',
+	dish_host               => '192.168.100.1',
 	dish_interval_s         => 30,
 	db                      => 'sqlite',
 	pg_host                 => '',

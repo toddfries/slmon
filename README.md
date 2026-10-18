@@ -4,16 +4,12 @@ Unofficial Starlink monitor. It is not affiliated with SpaceX. Phase 1 stores
 dish history, status, and a few local health signals. Dashboards, graphs,
 alerts, and a Perl-native gRPC client are later phases and are not built.
 
-The dish in this setup is bridged to an OpenBSD firewall. It is not the
-router, so the stock address `192.168.100.1` does not apply and slmon does
-not fall back to it. The default `dish_host` is `100.69.0.1` port 9200.
-Override it in the config file when the dish is somewhere else.
+The dish in this setup is bridged to an OpenBSD firewall. The default
+`dish_host` is `192.168.100.1` port 9200. Override it in the config file
+when the dish is somewhere else.
 
-This host currently has no working route to `100.69.0.1` (the default route
-is the LAN gateway, and a poll of TCP port 9200 does not answer). `slmon once`
-says so and returns. `slmon start` keeps running and logs the same fact once,
-until the dish answers. Point a route at the dish, or set `dish_host`, before
-expecting live samples.
+If that port does not answer, `slmon once` says so and returns. `slmon start`
+keeps running and logs the same fact once, until the dish answers.
 
 The manual is `man/man8/slmon.8` (`mandoc man/man8/slmon.8`).
 
@@ -37,7 +33,7 @@ it; edit the path before installing it.
 
 ```
 listen = 127.0.0.1:8080
-dish_host = 100.69.0.1
+dish_host = 192.168.100.1
 dish_interval_s = 30
 db = sqlite
 ```
@@ -92,7 +88,7 @@ Regress uses `bsd.regress.mk`. It covers the auth, history, rollup,
 retention, and watchdog functions, both database drivers, and an end-to-end
 run with a pty password prompt and a fake dish. The PostgreSQL targets
 `initdb` a private cluster and remove it. The live-dish target runs
-`slmon once` only when `100.69.0.1:9200` answers.
+`slmon once` only when `192.168.100.1:9200` answers.
 
 ## Not in this tree
 

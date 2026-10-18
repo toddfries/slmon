@@ -26,13 +26,8 @@ The dish protocol is the public Device Handle service.
 The intended dish is bridged onto an
 .Ox
 firewall.
-It is not routing the LAN, so the stock address
-.Li 192.168.100.1
-does not apply and
-.Nm
-does not fall back to it.
 The default dish address is
-.Li 100.69.0.1
+.Li 192.168.100.1
 port 9200.
 A host with no route to that address must set
 .Va dish_host
@@ -176,7 +171,7 @@ Keys and their defaults:
 Must be
 .Li host:port .
 .It Va dish_host
-.Li 100.69.0.1 .
+.Li 192.168.100.1 .
 A suffix
 .Li :port
 replaces the default port 9200.
@@ -228,7 +223,7 @@ Comma-separated hosts.
 A sample file:
 .Bd -literal -offset indent
 listen = 127.0.0.1:8080
-dish_host = 100.69.0.1
+dish_host = 192.168.100.1
 dish_interval_s = 30
 db = sqlite
 .Ed
