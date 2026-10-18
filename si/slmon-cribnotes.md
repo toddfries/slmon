@@ -22,6 +22,7 @@ One checkout, several processes, libc `imsg` between them. SQLite by default, Po
 - `83dcea9` — `use IO::Select ();` in `DishProc.pm` before unveil. `IO::Socket` timed connect does `require IO::Select` after unveil and Perl then reports the module missing even though it is base. The empty import list keeps builtin `select`.
 - `59dcf50` — browser login. `GET /login` form posts `user` and `password` to `/login`. Success sets `slmon_session` and redirects to `/`. `POST /api/login` remains the JSON login.
 - `87a4e17` — `GET /` with a session is the dashboard (inline SVG, no script, no CDN). That request was charts of data already stored. It was not the rest of the old output list (health score, SLA, CSV, alerts, speed tests).
+- `51274e9` — minute, hour, and day rows store obstruction from `metrics` and jitter as the spread of the 1 Hz latencies. The charts read that tier when it has the values. `ALTER TABLE` adds the columns to an existing database at the next start.
 
 The follow-on (windows `24h`/`7d`/`30d`/`365d`/`ever`, per-panel refresh, notify plugins, then optimization, aging, baselines) is approved in `si/slmon-plan.md`. Step 1 is the rollup columns below. Later steps stay in that file until the previous step works.
 
