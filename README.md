@@ -46,6 +46,9 @@ otherwise. Open `http://127.0.0.1:8080/` for the dashboard. The login form
 is `http://127.0.0.1:8080/login`. A successful login sets the
 `slmon_session` cookie and returns to `/`. The window is 24 hours, 7 days,
 30 days, 365 days, or the whole collection (`/?range=24h`). `GET /health` is open.
+A browser on `127.0.0.1` or `localhost` can install the dashboard. The Install
+button appears when that browser offers it. The manifest, icons, and worker
+are served by the listener and need no session. The worker does not store pages.
 `POST /api/login` is the same check for a client that wants JSON back.
 Everything under `/api/` except that login needs the cookie.
 

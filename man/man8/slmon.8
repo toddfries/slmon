@@ -339,6 +339,22 @@ in that reply differs from the page, the browser reloads.
 is fixed when the HTTP process starts.
 It covers the page source and the configuration values the page shows.
 A newer file on disk is served after that process is restarted.
+.Pa /manifest.webmanifest ,
+.Pa /sw.js ,
+.Pa /icon-192.png ,
+and
+.Pa /icon-512.png
+need no session.
+A browser on
+.Li 127.0.0.1
+or
+.Li localhost
+can install the dashboard as an application.
+The Install button appears when that browser offers the prompt.
+The installed window opens at
+.Pa /
+and keeps loading live data.
+The worker does not store pages.
 A logout button posts to
 .Pa /logout .
 .It Cm GET /login

@@ -419,13 +419,160 @@ sub view_from {
 	};
 }
 
+# Stored deflate, so the icon needs no zlib module and can be built
+# after the http process has pledged inet.
+my @CRC32;
+my %ICON_PNG;
+
+sub _crc32 {
+	my ($data) = @_;
+	if (!@CRC32) {
+		for my $n (0 .. 255) {
+			my $c = $n;
+			for (0 .. 7) {
+				$c = ($c & 1) ? (0xedb88320 ^ ($c >> 1)) : ($c >> 1);
+			}
+			$CRC32[$n] = $c;
+		}
+	}
+	my $crc = 0xffffffff;
+	for my $byte (unpack('C*', $data)) {
+		$crc = $CRC32[($crc ^ $byte) & 0xff] ^ ($crc >> 8);
+	}
+	return $crc ^ 0xffffffff;
+}
+
+sub _adler32 {
+	my ($data) = @_;
+	my ($a, $b) = (1, 0);
+	for my $c (unpack('C*', $data)) {
+		$a = ($a + $c) % 65521;
+		$b = ($b + $a) % 65521;
+	}
+	return ($b << 16) | $a;
+}
+
+sub _zlib_store {
+	my ($data) = @_;
+	my $out = pack('C2', 0x78, 0x01);
+	my $off = 0;
+	my $len = length($data);
+	while ($off < $len) {
+		my $n = $len - $off;
+		$n = 65535 if $n > 65535;
+		my $last = ($off + $n >= $len) ? 1 : 0;
+		$out .= pack('C v v', $last, $n, ($n ^ 0xffff) & 0xffff);
+		$out .= substr($data, $off, $n);
+		$off += $n;
+	}
+	$out .= pack('N', _adler32($data));
+	return $out;
+}
+
+sub _png_chunk {
+	my ($type, $data) = @_;
+	return pack('N', length($data)) . $type . $data
+	    . pack('N', _crc32($type . $data));
+}
+
+sub _plot {
+	my ($buf, $size, $x, $y, $thick, $fg) = @_;
+	my $r = int($thick / 2);
+	for my $dy (-$r .. $r) {
+		for my $dx (-$r .. $r) {
+			next if ($dx * $dx + $dy * $dy) > ($r * $r);
+			my $px = $x + $dx;
+			my $py = $y + $dy;
+			next if $px < 0 || $py < 0 || $px >= $size || $py >= $size;
+			substr($$buf, ($py * $size + $px) * 3, 3) = $fg;
+		}
+	}
+	return;
+}
+
+sub _stroke {
+	my ($buf, $size, $a, $b, $thick, $fg) = @_;
+	my $x0 = int($a->[0] * ($size - 1));
+	my $y0 = int($a->[1] * ($size - 1));
+	my $x1 = int($b->[0] * ($size - 1));
+	my $y1 = int($b->[1] * ($size - 1));
+	my $dx = abs($x1 - $x0);
+	my $dy = abs($y1 - $y0);
+	my $sx = $x0 < $x1 ? 1 : -1;
+	my $sy = $y0 < $y1 ? 1 : -1;
+	my $err = $dx - $dy;
+	while (1) {
+		_plot($buf, $size, $x0, $y0, $thick, $fg);
+		last if $x0 == $x1 && $y0 == $y1;
+		my $e2 = 2 * $err;
+		if ($e2 > -$dy) { $err -= $dy; $x0 += $sx; }
+		if ($e2 < $dx) { $err += $dx; $y0 += $sy; }
+	}
+	return;
+}
+
+sub _icon_rgb {
+	my ($size) = @_;
+	my $buf = pack('C3', 0x1d, 0x4e, 0x89) x ($size * $size);
+	my $fg = pack('C3', 255, 255, 255);
+	my $thick = int($size / 28);
+	$thick = 3 if $thick < 3;
+	my @pts = ([0.28, 0.68], [0.42, 0.44], [0.58, 0.56], [0.72, 0.32]);
+	for my $i (0 .. $#pts - 1) {
+		_stroke(\$buf, $size, $pts[$i], $pts[$i + 1], $thick, $fg);
+	}
+	return $buf;
+}
+
+sub icon_png {
+	my ($size) = @_;
+	return $ICON_PNG{$size} if defined $ICON_PNG{$size};
+	my $rgb = _icon_rgb($size);
+	my $stride = $size * 3;
+	my $raw = '';
+	for (my $y = 0; $y < $size; $y++) {
+		$raw .= "\x00" . substr($rgb, $y * $stride, $stride);
+	}
+	my $ihdr = pack('NNC5', $size, $size, 8, 2, 0, 0, 0);
+	$ICON_PNG{$size} = "\x89PNG\r\n\x1a\n"
+	    . _png_chunk('IHDR', $ihdr)
+	    . _png_chunk('IDAT', _zlib_store($raw))
+	    . _png_chunk('IEND', '');
+	return $ICON_PNG{$size};
+}
+
+sub manifest_body {
+	return '{"name":"slmon","short_name":"slmon","start_url":"/","scope":"/",'
+	    . '"display":"standalone","background_color":"#ffffff","theme_color":"#1d4e89",'
+	    . '"icons":['
+	    . '{"src":"/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any"},'
+	    . '{"src":"/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any"}]}';
+}
+
+sub sw_body {
+	return <<'JS';
+self.addEventListener('install', function () {
+  self.skipWaiting();
+});
+self.addEventListener('activate', function (event) {
+  event.waitUntil(self.clients.claim());
+});
+self.addEventListener('fetch', function (event) {
+  event.respondWith(fetch(event.request));
+});
+JS
+}
+
 sub live_tags {
 	my ($rev, $refresh_s) = @_;
 	$rev //= '';
 	$refresh_s = 30 if !defined $refresh_s || $refresh_s !~ /\A[0-9]+\z/;
 	$refresh_s = int($refresh_s);
 	$refresh_s = SLMON::MIN_POLL_S if $refresh_s < SLMON::MIN_POLL_S;
-	return '<meta name="slmon-rev" content="' . _he($rev) . '">'
+	return '<link rel="manifest" href="/manifest.webmanifest">'
+	    . '<link rel="icon" href="/icon-192.png" type="image/png">'
+	    . '<meta name="theme-color" content="#1d4e89">'
+	    . '<meta name="slmon-rev" content="' . _he($rev) . '">'
 	    . '<meta name="slmon-refresh" content="' . $refresh_s . '">';
 }
 
@@ -450,6 +597,31 @@ sub live_script {
       .catch(function () {});
   }
   setInterval(check, 2000);
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(function () {});
+  }
+  var installBtn = document.getElementById('install');
+  var deferred = null;
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();
+    deferred = e;
+    if (installBtn) installBtn.hidden = false;
+  });
+  if (installBtn) {
+    installBtn.addEventListener('click', function () {
+      if (!deferred) return;
+      var pending = deferred;
+      deferred = null;
+      pending.prompt();
+      pending.userChoice.then(function () {
+        installBtn.hidden = true;
+      });
+    });
+  }
+  window.addEventListener('appinstalled', function () {
+    deferred = null;
+    if (installBtn) installBtn.hidden = true;
+  });
   if (!document.getElementById('live')) return;
   function advance() {
     fetch(location.pathname + location.search, {cache: 'no-store', credentials: 'same-origin'})
@@ -607,6 +779,7 @@ sub page {
 	    . 'body{font:16px/1.45 ui-sans-serif,sans-serif;margin:1.5rem auto;'
 	    . 'max-width:64rem;padding:0 1rem;color:#1a1a1a;background:#fff}'
 	    . 'header{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}'
+	    . '.tools{display:flex;align-items:center;gap:0.5rem}'
 	    . 'h1{font-size:1.4rem;font-weight:600;margin:0}'
 	    . 'h2{font-size:1rem;font-weight:600;margin:1.2rem 0 0.35rem}'
 	    . 'figure{margin:0.4rem 0 1rem}'
@@ -636,8 +809,9 @@ sub page {
 	    . 'button{font:inherit;padding:0.4rem 0.9rem}'
 	    . '</style></head><body><header><div><h1>slmon</h1>'
 	    . '<p class="who">Signed in as ' . _he($user) . '.</p></div>'
+	    . '<div class="tools"><button type="button" id="install" hidden>Install</button>'
 	    . '<form method="post" action="/logout"><button type="submit">Log out</button></form>'
-	    . '</header>'
+	    . '</div></header>'
 	    . '<div id="live" data-drawn="' . $drawn . '">'
 	    . $err
 	    . '<nav class="ranges">' . join('', @nav) . '</nav>'

@@ -425,7 +425,11 @@ ok($form =~ m{\AHTTP/1.0 200 } && $form =~ m{text/html}
     && $form =~ m{action="/login"} && $form =~ m{name="password"},
     'login form');
 ok($form =~ /setInterval\(check, 2000\)/ && $form !~ /id="live"/
-    && $form =~ /name="slmon-rev"/,
+    && $form =~ /name="slmon-rev"/
+    && $form =~ /rel="manifest" href="\/manifest.webmanifest"/
+    && $form =~ /id="install" hidden/
+    && $form =~ /serviceWorker.register\('\/sw.js'\)/
+    && $form =~ /beforeinstallprompt/,
     'login page checks for a newer revision');
 my $root = SLMON::Http::respond(http_req('GET', '/'), $hctx);
 ok($root =~ m{\AHTTP/1.0 303 } && $root =~ m{Location: /login},
@@ -486,6 +490,8 @@ ok($home =~ /id="live" data-drawn="/
     && $home =~ /Charts update every 30s/
     && $home =~ /sample every 30s/
     && $home =~ /setInterval\(check, 2000\)/
+    && index($home, 'id="install"') > 0
+    && index($home, 'id="install"') < index($home, 'id="live"')
     && $home =~ /j\.rev && rev && j\.rev !== rev/
     && $home =~ /Obstruction map every 5 min/
     && $home =~ /Listen 127\.0\.0\.1:8080/
@@ -522,6 +528,31 @@ my $health = SLMON::Http::respond(http_req('GET', '/health'), { %$hctx, rev => '
 ok($health =~ m{\AHTTP/1.0 200 } && $health =~ /Cache-Control: no-store/
     && $health =~ /"ok":true/ && $health =~ /"rev":"abc"/,
     'health reports the page revision');
+my $manifest = SLMON::Http::respond(http_req('GET', '/manifest.webmanifest'), $hctx);
+ok($manifest =~ m{\AHTTP/1.0 200 } && $manifest =~ m{application/manifest\+json}
+    && $manifest =~ /Cache-Control: no-store/
+    && $manifest =~ /"name":"slmon"/ && $manifest =~ /"start_url":"\/"/
+    && $manifest =~ /"display":"standalone"/
+    && $manifest =~ /"sizes":"192x192"/ && $manifest =~ /"sizes":"512x512"/,
+    'manifest is installable without a session');
+my $sw = SLMON::Http::respond(http_req('GET', '/sw.js'), $hctx);
+ok($sw =~ m{\AHTTP/1.0 200 } && $sw =~ m{text/javascript}
+    && $sw =~ /addEventListener\('fetch'/
+    && $sw =~ /respondWith\(fetch\(event\.request\)\)/
+    && $sw !~ /caches/,
+    'worker fetches from the network and does not cache');
+my $icon = SLMON::Http::respond(http_req('GET', '/icon-192.png'), $hctx);
+my ($ibody) = $icon =~ /\r\n\r\n(.*)\z/s;
+ok($icon =~ m{\AHTTP/1.0 200 } && $icon =~ m{image/png}
+    && defined $ibody && substr($ibody, 0, 8) eq "\x89PNG\r\n\x1a\n"
+    && unpack('N', substr($ibody, 16, 4)) == 192
+    && unpack('N', substr($ibody, 20, 4)) == 192
+    && $ibody =~ /\xff\xff\xff/s,
+    '192 icon is a png with a light trace');
+my $icon5 = SLMON::Dash::icon_png(512);
+ok(substr($icon5, -12) eq pack('N', 0) . 'IEND' . pack('N', 0xAE426082)
+    && unpack('N', substr($icon5, 16, 4)) == 512,
+    '512 icon ends with a valid IEND chunk');
 my $again = SLMON::Http::respond(http_req('GET', '/login',
     headers => { cookie => "slmon_session=$tok" }), $hctx);
 ok($again =~ m{\AHTTP/1.0 303 } && $again =~ m{Location: /},

@@ -39,6 +39,7 @@ Each window reads the finest tier that still covers it. `24h` prefers minutely r
 - `events`, `weather`, `speedtests`, and `alert_queue` have no delete path. `obstruction_map` is one row. `alert_queue` and `speedtests` have no writer yet.
 - The dish child is the only `libgrpc++` / `libprotobuf` process. A Perl gRPC client does not exist.
 - The listener is one config value, `127.0.0.1:8080`. A repeated `listen` line is not accepted yet. Login is bcrypt, the session cookie is HMAC-SHA256 for 12 hours, and login failures are rate limited. There is no delete API.
+- The dashboard can be installed from `127.0.0.1` or `localhost`. The manifest, icons, and worker are responses from the http process. The worker does not cache. The Install button appears when the browser offers the prompt. A later phase does not add a second worker or a cache of the page.
 
 ## Phase 2 — see the record and act on it
 

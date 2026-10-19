@@ -70,6 +70,7 @@ Listener default `127.0.0.1:8080`. One request per connection, `Connection: clos
 - `POST /logout` — clears the cookie, redirects to `/login`.
 - `GET /api/latest/TABLE`, `GET /api/raw/TABLE?from&to&limit&order` — cookie required. Default limit 5000, max 50000. Allow-listed tables only.
 - No delete request. No static files.
+- Install, no session: `GET /manifest.webmanifest`, `GET /sw.js`, `GET /icon-192.png`, `GET /icon-512.png`. The worker's fetch handler calls `fetch(event.request)` and does not use `caches`. The Install button is in the header, hidden until `beforeinstallprompt`. Install works on `127.0.0.1` and `localhost`. The installed window opens at `/`. Icons are PNGs built in the process (stored deflate, no zlib module) and cached in that process.
 
 Cookie `slmon_session`: HMAC-SHA256, 12h, HttpOnly, SameSite=Lax, Path=/, Max-Age=43200. Password check stays in the db child. Five failures per IP per five minutes.
 
@@ -94,7 +95,7 @@ A process started before a code change keeps the old HTTP behavior until that pr
 
 `make regress` (builds `ext/imsg` and `ext/dishbridge`, then `bsd.regress.mk`). Targets: unit, imsg, dish pledge, sqlite db, postgres db, sqlite e2e, postgres e2e, live. Postgres targets `initdb` a private cluster and remove it. Missing `initdb` or `DBD::Pg` fails those targets. Live target probes `192.168.100.1:9200` with `nc -z -w 2`, then `slmon once`, and should pass on this host rather than skip.
 
-`regress/unit.pl` puts both `../lib` and `../blib` on `@INC`. `SLMON::Http` loads the `SLMON::Imsg` XS at compile time. `perl -c` of an HTTP module needs `-Ilib -Iblib`. Last full `make regress` after the five-window page was green, including a live status document.
+`regress/unit.pl` puts both `../lib` and `../blib` on `@INC`. `SLMON::Http` loads the `SLMON::Imsg` XS at compile time. `perl -c` of an HTTP module needs `-Ilib -Iblib`. Last full `make regress` after the install button was green, including a live status document.
 
 `CFLAGS`/`CXXFLAGS` arrive as `-O2 -pipe`, so the Makefile uses `+= -fPIC`. Generated `ext/dishbridge/gen/` and `blib/` are gitignored. `protoc` and `/usr/local/bin/grpc_cpp_plugin`. Perl sources use tabs. Comments only for a non-obvious constraint.
 

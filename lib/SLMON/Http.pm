@@ -178,7 +178,9 @@ sub _page {
 	    . '<title>' . _he($title) . '</title><style>'
 	    . 'body{font:16px/1.45 ui-sans-serif,sans-serif;margin:2rem auto;'
 	    . 'max-width:32rem;padding:0 1rem;color:#1a1a1a;background:#fff}'
-	    . 'h1{font-size:1.4rem;font-weight:600;margin:0 0 1rem}'
+	    . 'header{display:flex;justify-content:space-between;align-items:center;gap:1rem;'
+	    . 'margin-bottom:1rem}'
+	    . 'h1{font-size:1.4rem;font-weight:600;margin:0}'
 	    . 'label{display:block;margin:0.9rem 0}'
 	    . 'input{display:block;width:100%;box-sizing:border-box;margin-top:0.25rem;'
 	    . 'font:inherit;padding:0.4rem 0.5rem}'
@@ -197,7 +199,9 @@ sub _login_page {
 		$err = '<p class="error">' . _he($error) . '</p>';
 	}
 	return _page('slmon login',
-	    '<h1>slmon</h1>' . $err
+	    '<header><h1>slmon</h1>'
+	    . '<button type="button" id="install" hidden>Install</button></header>'
+	    . $err
 	    . '<form method="post" action="/login">'
 	    . '<label for="user">User <input id="user" name="user" value="' . _he($user) . '"'
 	    . ' autocomplete="username" autofocus></label>'
@@ -355,6 +359,19 @@ sub respond {
 	if ($method eq 'GET' && $path eq '/health') {
 		my $rev = defined $ctx->{rev} ? $ctx->{rev} : '';
 		return _json_response(200, { ok => JSON::PP::true, rev => $rev },
+		    "Cache-Control: no-store\r\n");
+	}
+	if ($method eq 'GET' && $path eq '/manifest.webmanifest') {
+		return _response(200, 'application/manifest+json',
+		    SLMON::Dash::manifest_body(), "Cache-Control: no-store\r\n");
+	}
+	if ($method eq 'GET' && $path eq '/sw.js') {
+		return _response(200, 'text/javascript; charset=utf-8',
+		    SLMON::Dash::sw_body(), "Cache-Control: no-store\r\n");
+	}
+	if ($method eq 'GET' && ($path eq '/icon-192.png' || $path eq '/icon-512.png')) {
+		my $size = $path eq '/icon-192.png' ? 192 : 512;
+		return _response(200, 'image/png', SLMON::Dash::icon_png($size),
 		    "Cache-Control: no-store\r\n");
 	}
 	if ($method eq 'GET' && $path eq '/login') {
