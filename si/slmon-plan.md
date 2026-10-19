@@ -1,6 +1,6 @@
 # Status
 
-Approved 2026-10-18. Step 1 is in the tree: minute, hour, and day rows store obstruction and jitter, and the charts read that tier when it exists. Do not start step 2 until that is the behavior you see. Man pages and the README describe the tool, not this list.
+Approved 2026-10-18. Steps 1 and 2 are in the tree, and the current page already refreshes on the dish interval. The page is Overview, Quality, Throughput, Dish, and History, for `24h`, `7d`, `30d`, `365d`, and `ever`. Do not start step 4 until that is the behavior you see. Man pages and the README describe the tool, not this list.
 
 # slmon — phases 2 through 5
 
@@ -16,7 +16,7 @@ These apply to the whole plan. A later phase does not invent a second window set
 
 **Original work.** Code, pages, and wording are written in this tree. Do not copy another project's source, markup, or text. Other projects are documentation, opened only to troubleshoot something this plan is already doing. They are not a list of features to add, and they are not named here.
 
-**Windows.** Any view, export, score, or comparison that covers a span of time uses `24h`, `7d`, `30d`, `365d`, and `ever`. `ever` is the whole collection, from the earliest stored sample or event through now. The URL value is `ever`. The label is "Ever". The page has one window control. Phase 2 replaces the shipped `1h` / `6h` / `24h` / `7d` control with this set.
+**Windows.** Any view, export, score, or comparison that covers a span of time uses `24h`, `7d`, `30d`, `365d`, and `ever`. `ever` is the whole collection, from the earliest stored sample or event through now. The URL value is `ever`. The label is "Ever". The page has one window control, and it uses this set.
 
 Each window reads the finest tier that still covers it. `24h` prefers minutely rows. `7d` and `30d` prefer hourly rows. `365d` and `ever` prefer daily rows and use hourly rows where the day has not been rolled yet. Obstruction and jitter have to be on those rows, or the long windows are blank.
 
@@ -35,7 +35,7 @@ Each window reads the finest tier that still covers it. `24h` prefers minutely r
 ## Already true, so later phases must not pretend otherwise
 
 - `history_samples` older than 90 days are averaged into `metrics_hourly` and deleted. `metrics` snapshots use that same cut. Hourly rows older than 365 days are averaged into `metrics_daily` and deleted. Minutely rows older than 730 days are deleted.
-- Hourly compression stores average drop, average latency, min and max latency, average and max obstruction, jitter, and average throughput. Obstruction comes from `metrics`. Jitter is the spread of the 1 Hz latencies (max minus min). A conflicting row keeps throughput already stored and fills a null obstruction or jitter. `history_samples` still has no obstruction column. The dashboard reads the rollup for obstruction when that tier has a fraction, and reads `metrics` when it does not. The one-hour obstruction chart is status polls. The one-hour jitter chart is the per-minute rollup.
+- Hourly compression stores average drop, average latency, min and max latency, average and max obstruction, jitter, and average throughput. Obstruction comes from `metrics`. Jitter is the spread of the 1 Hz latencies (max minus min). A conflicting row keeps throughput already stored and fills a null obstruction or jitter. `history_samples` still has no obstruction column. The dashboard reads the rollup for obstruction when that tier has a fraction, and reads `metrics` when it does not. `24h` reads minutely rows. `7d` and `30d` read hourly rows. `365d` and `ever` read daily rows and keep an hourly row when that UTC day has no daily row. Jitter on every window is the jitter stored on those rows. Raw metrics are kept 90 days, so the obstruction fallback does not cover a full year.
 - `events`, `weather`, `speedtests`, and `alert_queue` have no delete path. `obstruction_map` is one row. `alert_queue` and `speedtests` have no writer yet.
 - The dish child is the only `libgrpc++` / `libprotobuf` process. A Perl gRPC client does not exist.
 - The listener is one config value, `127.0.0.1:8080`. A repeated `listen` line is not accepted yet. Login is bcrypt, the session cookie is HMAC-SHA256 for 12 hours, and login failures are rate limited. There is no delete API.
@@ -44,9 +44,9 @@ Each window reads the finest tier that still covers it. `24h` prefers minutely r
 
 Build in this order. Each step is usable before the next one starts. Windows, refresh, hooks, listen lines, retention knobs, debug lines, and reply-shape notes are the rules above.
 
-1. **Honest rollup columns.** Done. Minute, hour, and day rows store real obstruction (avg and max) from `metrics`, and jitter from `history_samples` (the spread of the 1 Hz latencies in that bucket). The obstruction and jitter charts read that tier when it exists. The raw `metrics` scan remains where that tier does not exist yet. The page still uses `1h` / `6h` / `24h` / `7d` until step 2.
+1. **Honest rollup columns.** Done. Minute, hour, and day rows store real obstruction (avg and max) from `metrics`, and jitter from `history_samples` (the spread of the 1 Hz latencies in that bucket). The obstruction and jitter charts read that tier when it exists. The raw `metrics` scan remains where that tier does not exist yet.
 
-2. **Sections, one page, one window.** Overview (what is there now), Quality (loss, latency, jitter), Throughput, Dish (identity, azimuth, elevation, SNR, alerts, grid), History (events). The window control is `24h`, `7d`, `30d`, `365d`, and `ever`. No tab framework.
+2. **Sections, one page, one window.** Done. Overview is the latest sample. Quality is packet loss, latency, jitter, and obstruction. Throughput is downlink and uplink. Dish is identity, azimuth, elevation, SNR, alerts, and the grid. History is events. One control: `24h` (default), `7d`, `30d`, `365d`, `ever`. No tabs. `24h` reads minutely rows. `7d` and `30d` read hourly rows. `365d` and `ever` read daily rows and keep hourly rows for a UTC day that has no daily row. `ever` has no lower bound and the chart starts at the earliest drawn point. An unknown value, including `1h` and `6h`, is `24h`. Volume, peaks, and obstruction duration are not this step. They are under Still to draw.
 
 3. **Refresh on the panels that exist.** Done for the current page: the series, the map, and the event list redraw in place on `dish_interval_s`, and the page reloads when `GET /health` reports a new `rev`. Sky, calendar, health, SLA, and weather join that same interval and revision check in the step that adds them.
 
@@ -85,6 +85,14 @@ Build in this order. Each step is usable before the next one starts. Windows, re
 12. **More than one listen line.** The parent binds every `listen` value and the http child serves each socket that bound. IPv4 loopback and IPv6 loopback are both accepted in one file. Further local addresses are further lines. The man page shows the repeated key. Debug logs each bind with the address and the result.
 
 13. **Reply shape on the dish child we have.** The C++ client records new, missing, and retyped fields on `get_status`, `get_history`, and the obstruction map, as the reply-shape rule says. This does not wait for the Perl client.
+
+## Still to draw
+
+These sit on the sections from step 2. They are not a step of their own and they are not next. Steps 4 through 13 stay in the order above. Sky stays step 4.
+
+- **Volume, on Throughput.** Bytes down, bytes up, and the two added, for the selected window, from `down_bytes` and `up_bytes` already stored on minute, hour, and day rows.
+- **Peaks, on Throughput and Quality.** Peak download, peak upload, and the lowest latency in the selected window. Minute rows already store `max_downlink_bps`, `max_uplink_bps`, and `min_ping_latency_ms`. Hour and day rows do not store a peak rate. The same change adds those columns, so a long window does not invent a peak from an average.
+- **Obstruction behavior, on Dish.** Currently obstructed, average prolonged-obstruction duration, and average interval, from the latest status row (`currently_obstructed`, `obstruction_duration`, `obstruction_interval` on `metrics`). Numbers beside the fraction. Not a second series, and not rolled up.
 
 ## Phase 3 — optimization
 

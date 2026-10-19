@@ -44,8 +44,8 @@ db = sqlite
 `-l` overrides `listen`. The HTTP listener is loopback only unless you set
 otherwise. Open `http://127.0.0.1:8080/` for the dashboard. The login form
 is `http://127.0.0.1:8080/login`. A successful login sets the
-`slmon_session` cookie and returns to `/`. Charts cover 1 hour, 6 hours,
-24 hours, or 7 days (`/?range=1h`). `GET /health` is open.
+`slmon_session` cookie and returns to `/`. The window is 24 hours, 7 days,
+30 days, 365 days, or the whole collection (`/?range=24h`). `GET /health` is open.
 `POST /api/login` is the same check for a client that wants JSON back.
 Everything under `/api/` except that login needs the cookie.
 
@@ -96,14 +96,20 @@ run with a pty password prompt and a fake dish. The PostgreSQL targets
 
 ## Dashboard
 
-`/` shows the latest downlink, uplink, latency, loss, obstruction, and
-uptime, then charts of those series plus jitter. One hour uses status
-polls. Six and 24 hours use the per-minute rollup. Seven days uses the
-hourly rollup. Obstruction on the one-hour chart is the status poll. On a
-longer range it is the average stored with that rollup, or status polls
-when the rollup has no obstruction yet. Jitter is the spread of the 1 Hz
-latencies in the bucket (highest minus lowest). The one-hour jitter chart
-reads the per-minute rollup.
+`/` is one page. Overview is the latest downlink, uplink, latency, loss,
+obstruction, and uptime. Quality charts packet loss, latency, jitter, and
+obstruction. Throughput charts downlink and uplink. Dish shows identity,
+azimuth, elevation, SNR, alerts, and the obstruction grid. History lists
+recent events. The window is 24 hours (the default), 7 days, 30 days,
+365 days, or the whole collection (`/?range=24h`, `7d`, `30d`, `365d`,
+`ever`). An unknown value is 24 hours. 24 hours uses the per-minute rollup.
+7 and 30 days use the hourly rollup. 365 days and the whole collection use
+the daily rollup, plus an hourly row for any UTC day that has no daily row.
+The whole collection has no start time. Its charts begin at the earliest
+sample. Obstruction is the average stored on those rows, or status polls
+when the rollup has no obstruction yet. Those polls are kept 90 days.
+Jitter is the spread of the 1 Hz latencies in the bucket (highest minus
+lowest), stored on the same rows.
 The obstruction grid is the newest map from the dish: gray is unmeasured,
 blue is clear, red is blocked. The page also lists the configuration it
 is using (dish address, sample interval, chart interval, map interval,

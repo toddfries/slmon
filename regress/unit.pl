@@ -468,11 +468,18 @@ my $home = SLMON::Http::respond(http_req('GET', '/',
 	},
     });
 ok($home =~ /Signed in as admin/ && $home =~ m{action="/logout"}
-    && $home =~ /8\.0 Mbit\/s/ && $home =~ /aria-current="page"/
-    && $home =~ /href="\/\?range=24h"/ && $home =~ /a&lt;b/
-    && $home !~ /a<b/ && $home =~ /motors_stuck/
-    && $home =~ /class="series"/ && $home =~ m{<h2>Downlink}
-    && $home =~ m{<h2>Jitter},
+    && $home =~ /8\.0 Mbit\/s/
+    && $home =~ m{<a href="/\?range=24h" aria-current="page">24 hours</a>}
+    && $home =~ m{href="/\?range=7d"} && $home =~ m{href="/\?range=30d"}
+    && $home =~ m{href="/\?range=365d"} && $home =~ m{href="/\?range=ever">Ever</a>}
+    && $home !~ /range=1h/ && $home !~ /range=6h/
+    && $home =~ /id="overview".*id="quality".*id="throughput".*id="dish".*id="history"/s
+    && $home =~ /id="quality".*<h2>Packet loss.*<h2>Latency.*<h2>Jitter.*<h2>Obstruction.*id="throughput"/s
+    && $home =~ /id="throughput".*<h2>Downlink.*<h2>Uplink.*id="dish"/s
+    && $home =~ /id="dish".*a&lt;b.*motors_stuck.*id="history"/s
+    && $home !~ /id="overview".*motors_stuck.*id="quality"/s
+    && $home !~ /a<b/ && $home =~ /No obstruction map stored/
+    && $home =~ /class="series"/,
     'dashboard charts the stored samples');
 ok($home =~ /id="live" data-drawn="/
     && $home =~ /name="slmon-refresh" content="30"/
@@ -563,10 +570,54 @@ ok($map =~ /class="u"/ && $map =~ /class="c"/ && $map =~ /class="o"/,
     'obstruction map marks unmeasured, clear, and blocked cells');
 ok(join(' ', SLMON::StatusMap::alert_names(2)) eq 'motors_stuck',
     'alert bits decode to names');
-ok(SLMON::Dash::series_table('1h') eq 'metrics'
+ok(SLMON::Dash::range_name('6h') eq '24h'
+    && SLMON::Dash::range_name('1h') eq '24h'
+    && SLMON::Dash::range_name('ever') eq 'ever'
+    && SLMON::Dash::range_name('30d') eq '30d',
+    'unknown windows fall back to 24 hours');
+ok(!defined SLMON::Dash::range_seconds('ever')
+    && SLMON::Dash::range_seconds('24h') == 86400
+    && SLMON::Dash::range_seconds('7d') == 7 * 86400
+    && SLMON::Dash::range_seconds('30d') == 30 * 86400
+    && SLMON::Dash::range_seconds('365d') == 365 * 86400,
+    'ever has no lower bound');
+ok(SLMON::Dash::series_table('1h') eq 'metrics_minutely'
     && SLMON::Dash::series_table('24h') eq 'metrics_minutely'
-    && SLMON::Dash::series_table('7d') eq 'metrics_hourly',
+    && SLMON::Dash::series_table('7d') eq 'metrics_hourly'
+    && SLMON::Dash::series_table('30d') eq 'metrics_hourly'
+    && SLMON::Dash::series_table('365d') eq 'metrics_daily'
+    && SLMON::Dash::series_table('ever') eq 'metrics_daily',
     'chart window picks the rollup table');
+ok(SLMON::Dash::hourly_tail('365d') && SLMON::Dash::hourly_tail('ever')
+    && !SLMON::Dash::hourly_tail('30d') && !SLMON::Dash::hourly_tail('24h')
+    && !SLMON::Dash::hourly_tail('1h'),
+    'a year and ever keep the unrolled hours');
+my $merged = SLMON::Dash::merge_unrolled(
+    [{ ts_day => 86400, avg_downlink_bps => 1 }],
+    [
+	{ ts_hour => 3600, avg_downlink_bps => 2 },
+	{ ts_hour => 86400 + 3600, avg_downlink_bps => 3 },
+	{ ts_hour => 2 * 86400, avg_downlink_bps => 4 },
+    ],
+);
+ok(@$merged == 3
+    && $merged->[0]{ts_day} == 86400
+    && $merged->[1]{ts_hour} == 3600
+    && $merged->[2]{ts_hour} == 2 * 86400,
+    'hourly rows fill days that have no daily row');
+my $ever_html = SLMON::Dash::page({
+    user => 'admin',
+    range => 'ever',
+    now => 1_700_000_000,
+    series => [{
+	ts_day => 1_600_000_000, avg_downlink_bps => 1_000_000, jitter_ms => 3,
+    }],
+});
+ok($ever_html =~ m{<a href="/\?range=ever" aria-current="page">Ever</a>}
+    && $ever_html =~ /cx="58\.0"/
+    && $ever_html !~ /cx="6/
+    && $ever_html !~ /1970/,
+    'ever starts at the first stored sample');
 ok(!SLMON::Dash::tier_has_obstr([{ avg_ping_latency_ms => 1 }]),
     'a rollup without obstruction is not ready');
 ok(SLMON::Dash::tier_has_obstr([{ avg_obstr_fraction => 0 }]),

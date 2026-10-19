@@ -279,52 +279,55 @@ sub _db_query {
 	return \@rows;
 }
 
+sub _bounded {
+	my ($table, $from, $to, $limit, $order) = @_;
+	my $q = {
+		op => 'raw', table => $table, to => $to,
+		limit => $limit, order => $order,
+	};
+	$q->{from} = $from if defined $from;
+	return $q;
+}
+
 sub _dash_load {
 	my ($ctx, $range) = @_;
 	return $ctx->{dash}->($range) if ref $ctx->{dash} eq 'CODE';
 	my $now = $ctx->{now} // time;
 	my $sec = SLMON::Dash::range_seconds($range);
-	my $from = $now - $sec;
+	my $from = defined $sec ? $now - $sec : undef;
 	my $table = SLMON::Dash::series_table($range);
-	my $series = _db_query($ctx->{imsg}, {
-		op => 'raw', table => $table, from => $from, to => $now,
-		limit => 20000, order => 'asc',
-	});
-	# Obstruction and jitter live on the rollup once that tier has them.
-	# Status polls remain the obstruction source for 1h, and for a longer
-	# range whose rollup does not have a fraction yet.
+	my $series = _db_query($ctx->{imsg}, _bounded($table, $from, $now, 20000, 'asc'));
+	my $tail = 'none';
+	if (SLMON::Dash::hourly_tail($range)) {
+		my $hourly = _db_query($ctx->{imsg},
+		    _bounded('metrics_hourly', $from, $now, 20000, 'asc'));
+		$series = SLMON::Dash::merge_unrolled($series, $hourly);
+		$tail = 'metrics_hourly';
+	}
+	# Obstruction and jitter are columns on the rollup. Status polls fill
+	# obstruction only when that tier has no fraction yet. metrics is kept
+	# 90 days, so a year or ever only gets the recent part that way.
 	my $obstruction = $series;
 	my $obstr_from = 'series';
-	if ($table ne 'metrics' && !SLMON::Dash::tier_has_obstr($series)) {
-		$obstruction = _db_query($ctx->{imsg}, {
-			op => 'raw', table => 'metrics', from => $from, to => $now,
-			limit => 20000, order => 'asc',
-		});
+	if (!SLMON::Dash::tier_has_obstr($series)) {
+		$obstruction = _db_query($ctx->{imsg},
+		    _bounded('metrics', $from, $now, 20000, 'asc'));
 		$obstr_from = 'metrics';
 	}
-	my $jitter = $series;
-	if ($table eq 'metrics') {
-		$jitter = _db_query($ctx->{imsg}, {
-			op => 'raw', table => 'metrics_minutely', from => $from, to => $now,
-			limit => 20000, order => 'asc',
-		});
-	}
 	if (($ctx->{log_level} // '') eq 'debug') {
-		warn "slmon: dash range=$range table=$table rows=" . scalar(@$series)
-		    . " obstr=$obstr_from obstr_rows=" . scalar(@$obstruction)
-		    . " jitter_rows=" . scalar(@$jitter) . "\n";
+		warn "slmon: dash range=$range table=$table tail=$tail rows="
+		    . scalar(@$series) . " obstr=$obstr_from obstr_rows="
+		    . scalar(@$obstruction) . "\n";
 	}
 	my $latest = _db_query($ctx->{imsg}, { op => 'latest', table => 'metrics' });
 	my $info = _db_query($ctx->{imsg}, { op => 'latest', table => 'dish_info' });
-	my $events = _db_query($ctx->{imsg}, {
-		op => 'raw', table => 'events', from => $from, to => $now,
-		limit => 30, order => 'desc',
-	});
+	my $events = _db_query($ctx->{imsg},
+	    _bounded('events', $from, $now, 30, 'desc'));
 	my $map = _db_query($ctx->{imsg}, { op => 'latest', table => 'obstruction_map' });
 	return {
 		series       => $series,
 		obstruction  => $obstruction,
-		jitter       => $jitter,
+		jitter       => $series,
 		latest       => $latest->[0],
 		info         => $info->[0],
 		events       => $events,

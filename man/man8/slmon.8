@@ -279,26 +279,46 @@ and a five-second read timeout.
 .It Cm GET /
 With no session, redirects to
 .Pa /login .
-With a session, returns the dashboard: the latest sample, charts, the
-obstruction grid, and recent events.
+With a session, returns one page.
+Overview is the latest sample.
+Quality charts packet loss, latency, jitter, and obstruction.
+Throughput charts downlink and uplink.
+Dish shows identity, azimuth, elevation, SNR, alerts, and the obstruction grid.
+History lists recent events.
 .Va range
 is
-.Li 1h ,
-.Li 6h
+.Li 24h
 .Pq the default ,
-.Li 24h ,
+.Li 7d ,
+.Li 30d ,
+.Li 365d ,
 or
-.Li 7d .
-One hour is drawn from status polls.
-Six and 24 hours use the per-minute rollup.
-Seven days uses the hourly rollup.
-Obstruction on the one-hour chart is the status poll.
-On a longer range it is the average stored with that rollup.
+.Li ever .
+Anything else, including
+.Li 1h
+or
+.Li 6h ,
+is treated as
+.Li 24h .
+.Li 24h
+uses the per-minute rollup.
+.Li 7d
+and
+.Li 30d
+use the hourly rollup.
+.Li 365d
+and
+.Li ever
+use the daily rollup and an hourly row for each UTC day
+that has no daily row yet.
+.Li ever
+has no start time.
+Its charts run from the earliest sample in the window through now.
+Obstruction is the average stored on those rows.
 When that rollup has no obstruction yet, the chart reads status polls.
+Status polls are kept for 90 days, so that fallback does not cover a full year.
 Jitter is the highest 1 Hz latency in the bucket minus the lowest,
-in milliseconds.
-The one-hour jitter chart uses the per-minute rollup.
-A longer range uses the jitter stored on the same rows as the other charts.
+in milliseconds, stored on the same rows as the other charts.
 The page lists the configuration it is using: the dish address, how often
 the dish is sampled, how often the charts redraw, the obstruction map
 interval, the listen address, the database, and the retention windows.

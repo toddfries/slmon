@@ -10,22 +10,23 @@ use SLMON::Config;
 use SLMON::StatusMap;
 
 my %RANGE = (
-	'1h'  => 3600,
-	'6h'  => 6 * 3600,
-	'24h' => 24 * 3600,
-	'7d'  => 7 * 86400,
+	'24h'  => 86400,
+	'7d'   => 7 * 86400,
+	'30d'  => 30 * 86400,
+	'365d' => 365 * 86400,
+	'ever' => undef,
 );
 
 sub range_seconds {
 	my ($name) = @_;
-	return $RANGE{$name} if defined $name && exists $RANGE{$name};
-	return $RANGE{'6h'};
+	$name = range_name($name);
+	return $RANGE{$name};
 }
 
 sub range_name {
 	my ($name) = @_;
 	return $name if defined $name && exists $RANGE{$name};
-	return '6h';
+	return '24h';
 }
 
 # True when a rollup tier already carries an obstruction fraction.
@@ -41,9 +42,35 @@ sub tier_has_obstr {
 sub series_table {
 	my ($name) = @_;
 	$name = range_name($name);
-	return 'metrics' if $name eq '1h';
-	return 'metrics_hourly' if $name eq '7d';
-	return 'metrics_minutely';
+	return 'metrics_minutely' if $name eq '24h';
+	return 'metrics_hourly' if $name eq '7d' || $name eq '30d';
+	return 'metrics_daily';
+}
+
+# Daily rollup stops at the UTC day boundary, and only for days it has
+# already written. Hours for a missing day still have to be drawn.
+sub hourly_tail {
+	my ($name) = @_;
+	$name = range_name($name);
+	return $name eq '365d' || $name eq 'ever' ? 1 : 0;
+}
+
+sub merge_unrolled {
+	my ($daily, $hourly) = @_;
+	my %day;
+	for my $row (@{ $daily || [] }) {
+		my $ts = _num($row->{ts_day});
+		$day{$ts} = 1 if defined $ts;
+	}
+	my @out = @{ $daily || [] };
+	for my $row (@{ $hourly || [] }) {
+		my $ts = _num($row->{ts_hour});
+		next if !defined $ts;
+		my $d = $ts - ($ts % 86400);
+		next if $day{$d};
+		push @out, $row;
+	}
+	return \@out;
 }
 
 sub _num {
@@ -89,6 +116,18 @@ sub points {
 	return \@out;
 }
 
+sub _earliest {
+	my (@lists) = @_;
+	my $t;
+	for my $pts (@lists) {
+		for my $p (@{ $pts || [] }) {
+			next if !defined $p->{t};
+			$t = $p->{t} if !defined $t || $p->{t} < $t;
+		}
+	}
+	return $t;
+}
+
 sub fmt_rate {
 	my ($bps) = @_;
 	return 'n/a' if !defined _num($bps);
@@ -117,7 +156,12 @@ sub fmt_uptime {
 sub _fmt_clock {
 	my ($ts, $span) = @_;
 	return '' if !defined $ts;
-	my $fmt = (defined $span && $span >= 86400) ? '%m-%d %H:%M' : '%H:%M';
+	my $fmt = '%H:%M';
+	if (!defined $span || $span > 30 * 86400) {
+		$fmt = '%Y-%m-%d';
+	} elsif ($span > 86400) {
+		$fmt = '%m-%d';
+	}
 	return strftime($fmt, localtime($ts));
 }
 
@@ -184,6 +228,7 @@ sub chart_svg {
 	my $ph = $H - $top - $bot;
 	my @drawn = grep { defined $_->{v} } @$pts;
 	my $span = $to - $from;
+	my $label_span = exists $o{label_span} ? $o{label_span} : $span;
 	my $body;
 	if (!@drawn) {
 		$body = '<text class="empty" x="' . int($W / 2) . '" y="' . int($H / 2)
@@ -229,9 +274,9 @@ sub chart_svg {
 			$body .= '<polyline class="series" points="' . join(' ', @xy) . '"/>';
 		}
 		$body .= '<text class="tick" x="' . $left . '" y="' . ($H - 8) . '">'
-		    . _he(_fmt_clock($from, $span)) . '</text>';
+		    . _he(_fmt_clock($from, $label_span)) . '</text>';
 		$body .= '<text class="tick" x="' . ($W - $right) . '" y="' . ($H - 8)
-		    . '" text-anchor="end">' . _he(_fmt_clock($to, $span)) . '</text>';
+		    . '" text-anchor="end">' . _he(_fmt_clock($to, $label_span)) . '</text>';
 	}
 	my $cap = _he($title);
 	$cap .= ' (' . _he($unit) . ')' if $unit ne '';
@@ -242,7 +287,7 @@ sub chart_svg {
 }
 
 sub _series_chart {
-	my ($title, $unit, $key, $pts, $from, $to, $mul) = @_;
+	my ($title, $unit, $key, $pts, $from, $to, $mul, $label_span) = @_;
 	$mul //= 1;
 	my @p;
 	for my $row (@$pts) {
@@ -257,11 +302,12 @@ sub _series_chart {
 	}
 	@p = @{ _bucket(\@p, 480) };
 	return chart_svg(
-		title  => $title,
-		unit   => $unit,
-		from   => $from,
-		to     => $to,
-		points => \@p,
+		title      => $title,
+		unit       => $unit,
+		from       => $from,
+		to         => $to,
+		label_span => $label_span,
+		points     => \@p,
 	);
 }
 
@@ -449,7 +495,12 @@ sub page {
 	my $range = range_name($d->{range});
 	my $now = $d->{now} // time;
 	my $sec = range_seconds($range);
-	my $from = $d->{window_from} // ($now - $sec);
+	my $from;
+	if (exists $d->{window_from}) {
+		$from = $d->{window_from};
+	} elsif (defined $sec) {
+		$from = $now - $sec;
+	}
 	my $to = $d->{window_to} // $now;
 	my $pts = points($d->{series});
 	my $obpts = points(defined $d->{obstruction} ? $d->{obstruction} : $d->{series});
@@ -458,17 +509,27 @@ sub page {
 	my $info = $d->{info} || {};
 	my ($dscale, $dunit) = _rate_unit($pts, 'down');
 	my ($uscale, $uunit) = _rate_unit($pts, 'up');
-	my $charts = join '', map { _figure($_) } (
-		_series_chart('Downlink', $dunit, 'down', $pts, $from, $to, 1 / $dscale),
-		_series_chart('Uplink', $uunit, 'up', $pts, $from, $to, 1 / $uscale),
-		_series_chart('Latency', 'ms', 'lat', $pts, $from, $to, 1),
-		_series_chart('Jitter', 'ms', 'jitter', $jpts, $from, $to, 1),
-		_series_chart('Packet loss', '%', 'drop', $pts, $from, $to, 100),
-		_series_chart('Obstruction', '%', 'obstr', $obpts, $from, $to, 100),
+	# ever has no stored start. The axis begins at the first drawn point.
+	my $axis_from = defined $from ? $from : _earliest($pts, $obpts, $jpts);
+	my $quality = join '', map { _figure($_) } (
+		_series_chart('Packet loss', '%', 'drop', $pts, $axis_from, $to, 100, $sec),
+		_series_chart('Latency', 'ms', 'lat', $pts, $axis_from, $to, 1, $sec),
+		_series_chart('Jitter', 'ms', 'jitter', $jpts, $axis_from, $to, 1, $sec),
+		_series_chart('Obstruction', '%', 'obstr', $obpts, $axis_from, $to, 100, $sec),
+	);
+	my $throughput = join '', map { _figure($_) } (
+		_series_chart('Downlink', $dunit, 'down', $pts, $axis_from, $to, 1 / $dscale, $sec),
+		_series_chart('Uplink', $uunit, 'up', $pts, $axis_from, $to, 1 / $uscale, $sec),
 	);
 	my @nav;
-	for my $name (qw(1h 6h 24h 7d)) {
-		my %label = ('1h' => '1 hour', '6h' => '6 hours', '24h' => '24 hours', '7d' => '7 days');
+	my %label = (
+		'24h'  => '24 hours',
+		'7d'   => '7 days',
+		'30d'  => '30 days',
+		'365d' => '365 days',
+		'ever' => 'Ever',
+	);
+	for my $name (qw(24h 7d 30d 365d ever)) {
 		my $cur = $name eq $range ? ' aria-current="page"' : '';
 		push @nav, '<a href="/?range=' . $name . '"' . $cur . '>' . $label{$name} . '</a>';
 	}
@@ -497,11 +558,13 @@ sub page {
 		$id = '<p class="id">' . _he($info->{device_id}) . '</p>';
 	}
 	my $map = map_svg($d->{map});
-	my $map_html = '';
+	my $map_body;
 	if ($map ne '') {
-		$map_html = '<section class="panel"><h2>Obstruction map</h2>'
+		$map_body = '<h2>Obstruction map</h2>'
 		    . '<p class="note">Gray is unmeasured, blue is clear, red is blocked.</p>'
-		    . $map . '</section>';
+		    . $map;
+	} else {
+		$map_body = '<p class="note">No obstruction map stored.</p>';
 	}
 	my $ev = '';
 	for my $row (@{ $d->{events} || [] }) {
@@ -579,9 +642,7 @@ sub page {
 	    . $err
 	    . '<nav class="ranges">' . join('', @nav) . '</nav>'
 	    . $cadence
-	    . $id
-	    . (@dish ? '<p class="note">' . _he(join(' · ', @dish)) . '</p>' : '')
-	    . $alert
+	    . '<section id="overview"><h2>Overview</h2>'
 	    . '<section class="stats">'
 	    . _stat('Downlink', fmt_rate($latest->{downlink_bps}))
 	    . _stat('Uplink', fmt_rate($latest->{uplink_bps}))
@@ -592,9 +653,16 @@ sub page {
 	    . '</section>'
 	    . ($when ne '' ? '<p class="note' . $stale . '">Latest sample ' . _he($when)
 		. ($stale ? ', stale' : '') . '</p>' : '')
-	    . '<section class="charts">' . $charts . '</section>'
-	    . $map_html
-	    . '<section><h2>Events</h2>' . $ev . '</section>'
+	    . '</section>'
+	    . '<section id="quality"><h2>Quality</h2>' . $quality . '</section>'
+	    . '<section id="throughput"><h2>Throughput</h2>' . $throughput . '</section>'
+	    . '<section id="dish"><h2>Dish</h2>'
+	    . $id
+	    . (@dish ? '<p class="note">' . _he(join(' · ', @dish)) . '</p>' : '')
+	    . $alert
+	    . $map_body
+	    . '</section>'
+	    . '<section id="history"><h2>History</h2>' . $ev . '</section>'
 	    . $cfghtml
 	    . '</div>'
 	    . live_script()
