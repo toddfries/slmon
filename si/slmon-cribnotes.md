@@ -8,7 +8,7 @@ Shared rules are `si/aibootstrap/behavior.md` and `si/aibootstrap/values.md`. Th
 
 ## What it is
 
-Native Perl Starlink monitor. Unofficial, not affiliated with SpaceX. No Docker. Code, pages, and wording in this tree are original. Other projects are documentation, opened only to troubleshoot something this tree is already doing. They are not a feature list and they are not named here. The dish service is `SpaceX.API.Device.Device`, rpc `Handle`.
+Native Perl Starlink monitor. Unofficial, not affiliated with SpaceX. No Docker. Code, pages, and wording in this tree are original. Other projects are documentation, opened only to troubleshoot something this tree is already doing. They are not a feature list and they are not named here. When a request is outside this monitor, stop and ask whether this session is the right place before writing a file or a note. The dish service is `SpaceX.API.Device.Device`, rpc `Handle`.
 
 One checkout, several processes, libc `imsg` between them. SQLite by default, PostgreSQL optional, same DML. OpenBSD. Perl 5.42. System `libgrpc++` and `libprotobuf` are linked on purpose, and only inside the dish child after `fork`.
 
