@@ -97,7 +97,11 @@ A process started before a code change keeps the old HTTP behavior until that pr
 
 `regress/unit.pl` puts both `../lib` and `../blib` on `@INC`. `SLMON::Http` loads the `SLMON::Imsg` XS at compile time. `perl -c` of an HTTP module needs `-Ilib -Iblib`. Last full `make regress` after the `sld` / `slctl` split was green: 113 unit tests, the daemon target, both end-to-end drivers, and a live status document.
 
-`CFLAGS`/`CXXFLAGS` arrive as `-O2 -pipe`, so the Makefile uses `+= -fPIC`. Generated `ext/dishbridge/gen/` and `blib/` are gitignored. `protoc` and `/usr/local/bin/grpc_cpp_plugin`. Perl sources use tabs. Comments only for a non-obvious constraint.
+`CFLAGS`/`CXXFLAGS` arrive as `-O2 -pipe`, so the Makefile uses `+= -fPIC`. Generated `ext/dishbridge/gen/` and `blib/` are gitignored. `protoc` and `GRPC_CPP_PLUGIN` (default `/usr/local/bin/grpc_cpp_plugin`). Perl sources use tabs. Comments only for a non-obvious constraint.
+
+## Package
+
+The wip port is `net/slmon` under `/usr/ports/openbsd-wip`, version `0.1`. `pkg/port.recipe` and `pkg/port.manifest` are the file list. The built package is `/usr/ports/packages/amd64/all/slmon-0.1.tgz`. It installs `sld`, `slctl`, the Perl modules, both XS modules, the three manuals, `share/examples/slmon/sl.conf` as `@sample /etc/sl.conf`, and `@rcscript /etc/rc.d/sld`. It links `libgrpc++` and `libprotobuf` in the dish module. Run dependencies are `p5-DBI`, `p5-DBD-SQLite`, and `p5-IO-Socket-SSL`. `p5-DBD-Pg` is not a dependency. The package does not create `_sl` or `/var/sl`, because no numeric id was supplied and the packing list does not invent one. The port's `pkg/README` has the `groupadd` and `useradd` lines. A checkout `make install` still installs `rc.d/sld`. The port passes `SKIP_RCD=yes` so the package owns that file. The ports tree is not part of this repository's commits.
 
 `mandoc -Tlint` on the man page reports only `STYLE: RCS id missing: (OpenBSD)`. Do not invent an RCS id.
 

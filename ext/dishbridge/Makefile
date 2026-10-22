@@ -6,6 +6,7 @@ PERLINC!= perl -MConfig -e 'print "-I$$Config{archlib}/CORE $$Config{ccflags}"'
 TYPEMAP!= perl -MConfig -e 'print "$$Config{privlib}/ExtUtils/typemap"'
 GRPC_CFLAGS!= pkg-config --cflags protobuf grpc++
 GRPC_LIBS!= pkg-config --libs protobuf grpc++
+GRPC_CPP_PLUGIN ?= /usr/local/bin/grpc_cpp_plugin
 PROTO= ../../proto/spacex_device.proto
 GEN= gen
 
@@ -14,7 +15,7 @@ all: ../../blib/auto/SLMON/Dish/Dish.so
 ${GEN}/spacex_device.pb.cc ${GEN}/spacex_device.grpc.pb.cc: ${PROTO}
 	mkdir -p ${GEN}
 	protoc -I ../../proto --cpp_out=${GEN} \
-	    --grpc_out=${GEN} --plugin=protoc-gen-grpc=/usr/local/bin/grpc_cpp_plugin \
+	    --grpc_out=${GEN} --plugin=protoc-gen-grpc=${GRPC_CPP_PLUGIN} \
 	    spacex_device.proto
 
 Dish.c: Dish.xs dishbridge.h

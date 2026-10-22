@@ -1,0 +1,15 @@
+# Local distfile for the OpenBSD wip port. The bake script is the build.
+name=slmon
+version=0.1
+category=net
+comment=unofficial Starlink dish monitor
+maintainer=Todd T. Fries <todd@fries.net>
+permit=Yes
+pkg_arch=amd64
+no_build=no
+no_test=yes
+distfiles=/tlaptop.f/todd/distfiles
+ports_root=/usr/ports/openbsd-wip
+ports_distfiles=/usr/ports/distfiles
+ports_packages=/usr/ports/packages/amd64
+ports_plist=/usr/ports/plist/amd64

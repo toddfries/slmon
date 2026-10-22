@@ -27,7 +27,6 @@ install: all
 	install -d ${DESTDIR}${PREFIX}/man/man5
 	install -d ${DESTDIR}${PREFIX}/man/man8
 	install -d ${DESTDIR}${PREFIX}/share/examples/slmon
-	install -d ${DESTDIR}/etc/rc.d
 	install -m 0555 bin/sld bin/slctl ${DESTDIR}${PREFIX}/sbin
 	install -m 0444 lib/SLMON.pm ${SITE}/SLMON.pm
 	install -m 0444 lib/SLMON/*.pm ${SITE}/SLMON
@@ -37,4 +36,8 @@ install: all
 	install -m 0444 man/man8/sld.8 man/man8/slctl.8 ${DESTDIR}${PREFIX}/man/man8
 	install -m 0444 man/man5/sl.conf.5 ${DESTDIR}${PREFIX}/man/man5
 	install -m 0444 etc/sl.conf ${DESTDIR}${PREFIX}/share/examples/slmon/sl.conf
-	install -m 0555 rc.d/sld ${DESTDIR}/etc/rc.d/sld
+	# The port packages this script with @rcscript.
+	if [ "${SKIP_RCD}" != yes ]; then \
+		install -d ${DESTDIR}/etc/rc.d; \
+		install -m 0555 rc.d/sld ${DESTDIR}/etc/rc.d/sld; \
+	fi
