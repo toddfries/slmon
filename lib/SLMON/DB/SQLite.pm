@@ -19,7 +19,7 @@ sub types {
 
 sub connect {
 	my ($cfg, %opt) = @_;
-	my $path = $cfg->{db_path} or die "slmon: sqlite path is not set\n";
+	my $path = $cfg->{db_path} or die "sld: sqlite path is not set\n";
 	my %attr = (
 		RaiseError => 1,
 		PrintError => 0,

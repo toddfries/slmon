@@ -132,11 +132,11 @@ sub run {
 	require OpenBSD::Pledge;
 	require OpenBSD::Unveil;
 	OpenBSD::Unveil::unveil('/sbin/ping', 'x')
-	    or die "slmon: watchdog unveil: $!\n";
+	    or die "sld: watchdog unveil: $!\n";
 	OpenBSD::Unveil::unveil()
-	    or die "slmon: watchdog unveil lock: $!\n";
+	    or die "sld: watchdog unveil lock: $!\n";
 	OpenBSD::Pledge::pledge(qw(proc exec inet))
-	    or die "slmon: watchdog pledge: $!\n";
+	    or die "sld: watchdog pledge: $!\n";
 	my $st = state();
 	my $logged_ok = 0;
 	my @targets = split /\s*,\s*/, $cfg->{ping_targets} // '';

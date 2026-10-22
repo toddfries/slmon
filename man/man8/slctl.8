@@ -1,0 +1,111 @@
+.\"
+.Dd $Mdocdate: October 22 2026 $
+.Dt SLCTL 8
+.Os
+.Sh NAME
+.Nm slctl
+.Nd control the Starlink dish monitor
+.Sh SYNOPSIS
+.Nm slctl
+.Cm init Ns | Ns Cm status Ns | Ns Cm once
+.Op Fl c Ar file
+.Op Fl d Ar db
+.Op Fl l Ar host:port
+.Sh DESCRIPTION
+.Nm
+is the operator tool for
+.Xr sld 8 .
+It does not fork a daemon.
+.Bl -tag -width status
+.It Cm init
+Create the database and store the admin user and password.
+Refuses uid 0 with the line
+.Bd -literal -offset indent
+slctl: doas -u _sl slctl init
+.Ed
+.Pp
+Run as
+.Sy _sl ,
+it prompts:
+.Bd -literal -offset indent
+Admin user [admin]:
+Password:
+Repeat password:
+.Ed
+.Pp
+An empty user name stores
+.Li admin .
+The password is read with echo off, must be at least 8 characters,
+and must be entered the same way twice.
+It is stored with
+.Xr crypt 3
+bcrypt
+.Pq Li $2b$ .
+A 32-byte session key is read from
+.Pa /dev/urandom
+once and is not rotated later.
+A second
+.Cm init
+prints that the database is already initialized and does not change
+the password.
+The prompt needs a terminal.
+.It Cm status
+Print whether the database is initialized, which driver is configured,
+the database path, the dish host, the HTTP port, and how many history
+samples are stored.
+This opens the database read-only.
+The database is mode 0600 and owned by
+.Sy _sl ,
+so this is run as
+.Sy _sl
+or as root.
+.It Cm once
+Probe the dish once and print one status document as JSON.
+This does not start
+.Xr sld 8
+and does not write the database.
+If the dish port does not answer, the refusal is printed on standard
+error and the exit status is still 0.
+.El
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl c Ar file
+Configuration file.
+.It Fl d Ar db
+SQLite file for this command.
+Overrides
+.Va db_path .
+.It Fl l Ar host:port
+Listen address recorded for this command.
+.Cm once
+does not serve HTTP.
+.El
+.Sh FILES
+.Bl -tag -width Ds
+.It Pa /etc/sl.conf
+Default configuration when
+.Fl c
+is passed by the operator.
+See
+.Xr sl.conf 5 .
+.It Pa /var/sl/sl.db
+Database created by
+.Cm init
+when
+.Fl d
+is not used.
+.El
+.Sh EXIT STATUS
+.Cm init
+exits non-zero when run as root, when the prompt cannot be read,
+or when the database directory is missing.
+.Cm status
+exits non-zero when the database cannot be opened.
+.Cm once
+exits 0 after printing status JSON, and also exits 0 when the dish
+port does not answer.
+.Sh SEE ALSO
+.Xr crypt 3 ,
+.Xr sl.conf 5 ,
+.Xr sld 8

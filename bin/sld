@@ -1,0 +1,55 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use FindBin;
+BEGIN {
+	my $lib = "$FindBin::Bin/../lib";
+	if (-f "$lib/SLMON.pm") {
+		require lib;
+		lib->import($lib, "$FindBin::Bin/../blib");
+	}
+}
+
+use SLMON ();
+use SLMON::Config;
+use SLMON::Parent;
+
+$SLMON::PROG = 'sld';
+
+sub usage {
+	die <<"END";
+usage: sld [-F] [-n] [-c file] [-d db] [-l host:port]
+END
+}
+
+my ($foreground, $check, $file, $db, $listen);
+while (@ARGV) {
+	my $arg = shift @ARGV;
+	if ($arg eq '-F') {
+		$foreground = 1;
+	} elsif ($arg eq '-n') {
+		$check = 1;
+	} elsif ($arg eq '-c') {
+		$file = shift @ARGV;
+		die SLMON::err('-c needs a path') if !defined $file;
+	} elsif ($arg eq '-d') {
+		$db = shift @ARGV;
+		die SLMON::err('-d needs a path') if !defined $db;
+	} elsif ($arg eq '-l') {
+		$listen = shift @ARGV;
+		die SLMON::err('-l needs host:port') if !defined $listen;
+	} else {
+		usage();
+	}
+}
+
+my $cfg = SLMON::Config::load_file($file);
+SLMON::Config::apply_paths($cfg,
+	db_path => $db,
+	listen  => $listen,
+);
+$cfg->{_file} = $file if defined $file && $file ne '';
+exit 0 if $check;
+SLMON::Parent::run($cfg, foreground => $foreground ? 1 : 0);
+exit 0;

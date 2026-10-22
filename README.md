@@ -8,41 +8,41 @@ The dish in this setup is bridged to an OpenBSD firewall. The default
 `dish_host` is `192.168.100.1` port 9200. Override it in the config file
 when the dish is somewhere else.
 
-If that port does not answer, `slmon once` says so and returns. `slmon start`
-keeps running and logs the same fact once, until the dish answers.
+If that port does not answer, `slctl once` says so and returns. `sld` keeps
+running and logs the same fact once, until the dish answers.
 
-The manual is `man/man8/slmon.8` (`mandoc man/man8/slmon.8`).
+The manuals are `man/man8/sld.8`, `man/man8/slctl.8`, and `man/man5/sl.conf.5`.
 
 ## Run
 
-```
-perl bin/slmon init
-perl bin/slmon start
-perl bin/slmon status
-perl bin/slmon once
-```
-
-`start` and `init` ask for an admin user (default `admin`) and a password the
-first time the database is empty. The password is stored as OpenBSD `crypt(3)`
-bcrypt. The session signing key is read from `/dev/urandom` and is not
-rotated on the next start. A non-interactive start with no password set exits
-and tells you to run `slmon init` or `slmon start` from a terminal.
-
-`start` stays in the foreground. `rc.d/slmon` is an example that daemonizes
-it; edit the path before installing it.
+The database is `/var/sl/sl.db`. The directory is created for the `_sl` user
+before the first start. `sld` does not create it and does not prompt.
 
 ```
-listen = 127.0.0.1:8080
-dish_host = 192.168.100.1
-dish_interval_s = 30
-db = sqlite
+doas -u _sl slctl init
+rcctl enable sld
+rcctl start sld
+doas -u _sl slctl status
+slctl once
 ```
 
-`-d` or `SLMON_DB` picks the SQLite file. From a checkout the default is
-`./var/slmon.db`. Otherwise it is `~/.local/share/slmon/slmon.db`.
+`slctl init` as root prints `slctl: doas -u _sl slctl init` and exits.
+`sld` before that init prints:
 
-`-l` overrides `listen`. The HTTP listener is loopback only unless you set
-otherwise. Open `http://127.0.0.1:8080/` for the dashboard. The login form
+```
+sld: /var/sl/sl.db is not initialized
+sld: doas -u _sl slctl init
+```
+
+`sld` forks into the background. `sld -F` stays in the foreground. `sld -n`
+checks the configuration and exits. `rcctl reload sld` sends `SIGHUP`, which
+re-reads `/etc/sl.conf`. A changed database path waits for `rcctl restart sld`.
+
+From a checkout the same commands are `perl bin/sld` and `perl bin/slctl`.
+`-d` selects a SQLite file other than `/var/sl/sl.db`. `-l` overrides `listen`
+for that process. `-c` selects the configuration file.
+
+The sample file is `etc/sl.conf`. The listener defaults to loopback. Open `http://127.0.0.1:8080/` for the dashboard. The login form
 is `http://127.0.0.1:8080/login`. A successful login sets the
 `slmon_session` cookie and returns to `/`. The window is 24 hours, 7 days,
 30 days, 365 days, or the whole collection (`/?range=24h`). `GET /health` is open.
@@ -54,7 +54,7 @@ Everything under `/api/` except that login needs the cookie.
 
 ## Processes
 
-The parent is `slmon: parent`. It forks `dish`, `db`, `http`, and `watchdog`,
+The parent is `sld: parent`. It forks `dish`, `db`, `http`, and `watchdog`,
 plus `weather` when latitude and longitude are set. Children talk to the db
 process over libc `imsg`. The db process is the only one that writes the
 database. If it dies, the parent exits and leaves restart to rc.
@@ -93,9 +93,10 @@ make regress
 
 Regress uses `bsd.regress.mk`. It covers the auth, history, rollup,
 retention, and watchdog functions, both database drivers, and an end-to-end
-run with a pty password prompt and a fake dish. The PostgreSQL targets
-`initdb` a private cluster and remove it. The live-dish target runs
-`slmon once` only when `192.168.100.1:9200` answers.
+run with a pty password prompt and a fake dish. A daemon target checks an
+uninitialized database, `sld -n`, a background start, and `SIGHUP`. The
+PostgreSQL targets `initdb` a private cluster and remove it. The live-dish
+target runs `slctl once` only when `192.168.100.1:9200` answers.
 
 ## Dashboard
 

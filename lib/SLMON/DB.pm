@@ -564,23 +564,23 @@ sub _pledge_db {
 	my $dir = $cfg->{state_dir} || '.';
 	if (($cfg->{db} // '') eq 'sqlite') {
 		OpenBSD::Unveil::unveil($dir, 'rwc')
-		    or die "slmon: db unveil: $!\n";
+		    or die "sld: db unveil: $!\n";
 	}
 	if (($cfg->{db} // '') eq 'pg') {
 		my $sock = $cfg->{pg_host};
 		if (defined $sock && $sock ne '' && $sock =~ m{\A/}) {
 			OpenBSD::Unveil::unveil($sock, 'rw')
-			    or die "slmon: db unveil pg socket: $!\n";
+			    or die "sld: db unveil pg socket: $!\n";
 		}
 		OpenBSD::Unveil::unveil('/tmp', 'rw')
-		    or die "slmon: db unveil /tmp: $!\n";
+		    or die "sld: db unveil /tmp: $!\n";
 	}
 	OpenBSD::Unveil::unveil()
-	    or die "slmon: db unveil lock: $!\n";
+	    or die "sld: db unveil lock: $!\n";
 	my @p = qw(rpath wpath cpath flock recvfd);
 	push @p, 'unix' if ($cfg->{db} // '') eq 'pg';
 	OpenBSD::Pledge::pledge(@p)
-	    or die "slmon: db pledge: $!\n";
+	    or die "sld: db pledge: $!\n";
 	return;
 }
 
@@ -736,9 +736,16 @@ sub child {
 					} elsif ($msg->{type} == SLMON::IMSG_ATTACH) {
 						die "not ready\n" if !$ready;
 						_on_attach(\%peers, $msg, $ctl, $dbh);
+					} elsif ($msg->{type} == SLMON::IMSG_RELOAD) {
+						my $doc = SLMON::json_decode($msg->{data}) || {};
+						for my $k (qw(log_level raw_retention_days
+						    minutely_retention_days hourly_rollup_days
+						    rollup_interval_s)) {
+							$cfg->{$k} = $doc->{$k} if exists $doc->{$k};
+						}
 					}
 				};
-				warn "slmon: db ctl: $@" if $@;
+				warn "sld: db ctl: $@" if $@;
 			}
 		}
 		for my $name (keys %peers) {
@@ -752,11 +759,11 @@ sub child {
 			}
 			while (my $msg = $p->get) {
 				eval { _dispatch_peer($dbh, $p, $msg, $obs, $cfg, $roll) };
-				warn "slmon: db peer $name: $@" if $@;
+				warn "sld: db peer $name: $@" if $@;
 			}
 		}
 		eval { _maybe_roll($dbh, $cfg, $roll) };
-		warn "slmon: db rollup: $@" if $@;
+		warn "sld: db rollup: $@" if $@;
 	}
 }
 

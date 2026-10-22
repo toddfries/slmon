@@ -43,15 +43,15 @@ sub fetch {
 		SSL_hostname    => 'api.open-meteo.com',
 		Timeout         => 10,
 	);
-	die "slmon: weather connect: $!\n" if !$sock;
+	die "sld: weather connect: $!\n" if !$sock;
 	my $path = '/v1/forecast?' . _query($lat, $lon);
 	print $sock "GET $path HTTP/1.0\r\nHost: api.open-meteo.com\r\nConnection: close\r\n\r\n"
-	    or die "slmon: weather write: $!\n";
+	    or die "sld: weather write: $!\n";
 	local $/;
 	my $resp = <$sock> // '';
 	close $sock;
 	my ($body) = $resp =~ /\r\n\r\n(.*)\z/s;
-	die "slmon: weather: empty response\n" if !defined $body || $body eq '';
+	die "sld: weather: empty response\n" if !defined $body || $body eq '';
 	my $doc = SLMON::json_decode($body);
 	my $cur = $doc->{current} || {};
 	my $wind = $cur->{wind_speed_10m};
@@ -99,16 +99,16 @@ sub run {
 		next if !-e $path;
 		my $perm = -d $path ? 'r' : 'r';
 		OpenBSD::Unveil::unveil($path, $perm)
-		    or die "slmon: weather unveil $path: $!\n";
+		    or die "sld: weather unveil $path: $!\n";
 	}
 	OpenBSD::Unveil::unveil()
-	    or die "slmon: weather unveil lock: $!\n";
+	    or die "sld: weather unveil lock: $!\n";
 	OpenBSD::Pledge::pledge(qw(inet dns rpath))
-	    or die "slmon: weather pledge: $!\n";
+	    or die "sld: weather pledge: $!\n";
 	while (1) {
 		my $row = eval { fetch($cfg->{latitude}, $cfg->{longitude}) };
 		if ($@) {
-			warn "slmon: weather: $@";
+			warn "sld: weather: $@";
 		} elsif ($row) {
 			$imsg->send(SLMON::IMSG_WEATHER, SLMON::json_encode($row));
 		}

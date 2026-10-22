@@ -7,6 +7,7 @@ use SLMON ();
 
 my %DEFAULT = (
 	listen                  => '127.0.0.1:8080',
+	db_path                 => '/var/sl/sl.db',
 	dish_host               => '192.168.100.1',
 	dish_interval_s         => 30,
 	db                      => 'sqlite',
@@ -44,31 +45,33 @@ sub parse {
 		$n++;
 		next if $line =~ /\A\s*(?:#|\z)/;
 		if ($line !~ /\A\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*\z/) {
-			die "slmon: config line $n is not key = value\n";
+			die SLMON::err("config line $n is not key = value");
 		}
 		my ($k, $v) = ($1, $2);
-		die "slmon: unknown config key $k\n" if !exists $DEFAULT{$k};
+		die SLMON::err("unknown config key $k") if !exists $DEFAULT{$k};
 		$cfg{$k} = $v;
 	}
-	die "slmon: db must be sqlite or pg\n" if $cfg{db} ne 'sqlite' && $cfg{db} ne 'pg';
+	die SLMON::err('db must be sqlite or pg') if $cfg{db} ne 'sqlite' && $cfg{db} ne 'pg';
 	if ($cfg{db} eq 'pg' && $cfg{pg_db} eq '') {
-		die "slmon: db = pg requires pg_db\n";
+		die SLMON::err('db = pg requires pg_db');
 	}
 	for my $k (keys %INT_KEY) {
-		die "slmon: $k must be an integer\n" if $cfg{$k} !~ /\A[0-9]+\z/;
+		die SLMON::err("$k must be an integer") if $cfg{$k} !~ /\A[0-9]+\z/;
 		$cfg{$k} = int($cfg{$k});
 	}
-	die "slmon: dish_interval_s must be at least " . SLMON::MIN_POLL_S . "\n"
+	die SLMON::err('dish_interval_s must be at least ' . SLMON::MIN_POLL_S)
 	    if $cfg{dish_interval_s} < SLMON::MIN_POLL_S;
-	die "slmon: rollup_interval_s must be at least 1\n" if $cfg{rollup_interval_s} < 1;
-	die "slmon: log_level must be info or debug\n"
+	die SLMON::err('rollup_interval_s must be at least 1') if $cfg{rollup_interval_s} < 1;
+	die SLMON::err('log_level must be info or debug')
 	    if $cfg{log_level} ne 'info' && $cfg{log_level} ne 'debug';
 	if ($cfg{latitude} ne '' || $cfg{longitude} ne '') {
-		die "slmon: latitude and longitude must both be set\n"
+		die SLMON::err('latitude and longitude must both be set')
 		    if $cfg{latitude} eq '' || $cfg{longitude} eq '';
-		die "slmon: latitude is not a number\n" if $cfg{latitude} !~ /\A-?[0-9]+(?:\.[0-9]+)?\z/;
-		die "slmon: longitude is not a number\n" if $cfg{longitude} !~ /\A-?[0-9]+(?:\.[0-9]+)?\z/;
+		die SLMON::err('latitude is not a number') if $cfg{latitude} !~ /\A-?[0-9]+(?:\.[0-9]+)?\z/;
+		die SLMON::err('longitude is not a number') if $cfg{longitude} !~ /\A-?[0-9]+(?:\.[0-9]+)?\z/;
 	}
+	$cfg{db_path} = '/var/sl/sl.db' if !defined $cfg{db_path} || $cfg{db_path} eq '';
+	listen_endpoint(\%cfg);
 	return \%cfg;
 }
 
@@ -76,7 +79,7 @@ sub load_file {
 	my ($path) = @_;
 	my $text = '';
 	if (defined $path && $path ne '') {
-		open my $fh, '<', $path or die "slmon: $path: $!\n";
+		open my $fh, '<', $path or die SLMON::err("$path: $!");
 		local $/;
 		$text = <$fh> // '';
 		close $fh;
@@ -99,8 +102,11 @@ sub dish_endpoint {
 sub listen_endpoint {
 	my ($cfg) = @_;
 	my $spec = $cfg->{listen};
-	die "slmon: listen must be host:port\n" if $spec !~ /\A(.+):([0-9]+)\z/;
-	return ($1, int($2));
+	die SLMON::err('listen must be host:port') if $spec !~ /\A(.+):([0-9]+)\z/;
+	my $port = int($2);
+	die SLMON::err('listen port must be 0 or at least 1024')
+	    if $port != 0 && $port < 1024;
+	return ($1, $port);
 }
 
 sub apply_paths {
@@ -111,7 +117,9 @@ sub apply_paths {
 	}
 	my $db_path = $opt{db_path};
 	$db_path = $ENV{SLMON_DB} if !defined $db_path || $db_path eq '';
-	$db_path = SLMON::default_db_path($opt{root}) if !defined $db_path || $db_path eq '';
+	if (!defined $db_path || $db_path eq '') {
+		$db_path = $cfg->{db_path} || SLMON::default_db_path();
+	}
 	$cfg->{db_path} = $db_path;
 	if ($db_path =~ m{\A(.+)/[^/]+\z}) {
 		$cfg->{state_dir} = $1;

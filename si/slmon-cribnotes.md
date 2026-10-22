@@ -4,7 +4,7 @@
 
 Shared rules are `si/aibootstrap/behavior.md` and `si/aibootstrap/values.md`. This file overrides them for slmon. `si/aibootstrap` is a separate git repository. Do not add it to slmon's commits. `aihandbook` is a future name for that handbook, not a directory. The handbook text also says a later rename may be `sihandbook/`. Until a rename is on disk, read `si/aibootstrap/`.
 
-`man/man8/slmon.8` and `README.md` describe the tool as it runs. They do not describe phases or this conversation. The approved follow-on is `si/slmon-plan.md`. Steps 1 and 2 are in the tree: rollup rows store obstruction and jitter, and the page is one window across Overview, Quality, Throughput, Dish, and History. Do not start step 4 until that page is what the running process serves. Step 3 is already how this page refreshes. Later panels join that refresh when they are added.
+`man/man8/sld.8`, `man/man8/slctl.8`, `man/man5/sl.conf.5`, and `README.md` describe the tool as it runs. They do not describe phases or this conversation. The approved follow-on is `si/slmon-plan.md`. Steps 1 and 2 are in the tree: rollup rows store obstruction and jitter, and the page is one window across Overview, Quality, Throughput, Dish, and History. Do not start step 4 until that page is what the running process serves. Step 3 is already how this page refreshes. Later panels join that refresh when they are added.
 
 ## What it is
 
@@ -14,9 +14,9 @@ One checkout, several processes, libc `imsg` between them. SQLite by default, Po
 
 ## How it got here
 
-- `ea342b6` — collector. Parent forks dish, db, http, watchdog, and weather only when lat/lon are set. Dish polls every 30s (history ring plus one status), obstruction map every 5 min. Not the upstream 2s loop. Db child is the sole writer. First start prompts for admin user (default `admin`) and a password twice; bcrypt `$2b$`; empty and under 8 rejected. Non-interactive start with no password exits with the exact line telling the operator to run `slmon init` or `slmon start` from a terminal. Session key is 32 bytes from `/dev/urandom` and is not rotated.
+- `ea342b6` — collector. Parent forks dish, db, http, watchdog, and weather only when lat/lon are set. Dish polls every 30s (history ring plus one status), obstruction map every 5 min. Not the upstream 2s loop. Db child is the sole writer. `slctl init` prompts for the admin user (default `admin`) and a password twice; bcrypt `$2b$`; empty and under 8 rejected. `sld` does not prompt. A missing database exits before the fork with `sld: PATH is not initialized` and `sld: doas -u _sl slctl init`. Session key is 32 bytes from `/dev/urandom` and is not rotated.
 - `3b12f13` — man page, and the dish child stays inside pledge. Abseil's missing sysfs probe must return `ENOENT`, so `rpath` stays and that path is not unveiled.
-- `e242753` — an unreachable dish logs `slmon: dish: HOST:PORT does not answer` once, then retries quietly. Deadline exceeded, failed to connect, connection refused, and connection timed out all map to that line. No Perl stack trace.
+- `e242753` — an unreachable dish logs `sld: dish: HOST:PORT does not answer` once, then retries quietly. Deadline exceeded, failed to connect, connection refused, and connection timed out all map to that line. No Perl stack trace.
 - `32f7370` — service name. The dish rejected `spacex.api.device.Device`. The name it registers is `SpaceX.API.Device.Device`, rpc `Handle`, C++ namespace `SpaceX::API::Device`. Field numbers were left at the high tags because a live reply filled them. Do not switch to fleetview tags 1/2/3. Request: `get_status=1004`, `get_history=1007`, `dish_get_obstruction_map=2008`. Response: `dish_get_status=2004`, `dish_get_history=2006`, map `2008`.
 - `fec1ce0` — compiled default dish host is `192.168.100.1` port 9200. `100.69.0.1` was removed. From this host only `192.168.100.1` answers. No silent fallback. `100.69.224.251` is the firewall's Starlink-side address, not the dish. `100.50.212.133:443` is Amazon ads, not the dish.
 - `83dcea9` — `use IO::Select ();` in `DishProc.pm` before unveil. `IO::Socket` timed connect does `require IO::Select` after unveil and Perl then reports the module missing even though it is base. The empty import list keeps builtin `select`.
@@ -28,15 +28,15 @@ The follow-on is approved in `si/slmon-plan.md`. Step 1 is the rollup columns be
 
 ## Processes
 
-`ps` titles: `slmon: parent`, `dish`, `db`, `http`, `watchdog`, `weather`.
+`ps` titles: `sld: parent`, `sld: dish`, `sld: db`, `sld: http`, `sld: watchdog`, `sld: weather`. `rcctl check sld` matches `sld: parent` with `pgrep -xf`. Assigning `$0` is reported as `perl: sld: parent`. `proc_title` calls `setprogname("sld")` and then `setproctitle` through `SLMON::Imsg`, because this libc always prefixes the program name and does not treat a leading `-` as a request to skip that prefix.
 
-Parent forks and restarts children. If the db child dies, the parent exits non-zero. Dish child never forks and is the only process that loads `SLMON::Dish`. Parent `use`s `DishProc` and `Http` before fork so the children are not the first to compile them. A child that dies inside `_spawn` is warned as `slmon: NAME: …` and restarted.
+`sld` checks the database, then forks and `setsid`s unless `-F`. The short-lived parent `_exit`s. `SIGHUP` re-reads `/etc/sl.conf`. `listen`, dish, watchdog, and weather apply by restarting those children. Retention, `rollup_interval_s`, and `log_level` are sent to the db child. `db`, `db_path`, and `pg_*` changes are logged and wait for `rcctl restart sld`. A bad file is logged and the running configuration stays. Parent forks and restarts children. If the db child dies, the parent exits non-zero. Dish child never forks and is the only process that loads `SLMON::Dish`. Parent `use`s `DishProc` and `Http` before fork so the children are not the first to compile them. A child that dies inside `_spawn` is warned as `sld: NAME: …` and restarted.
 
 `SLMON::IMSG_MAX` is 262144, not 16KB. History still goes in chunks of at most 30 samples. The obstruction map is one message; a map larger than the max is a hard error.
 
-Commands: `start`, `init`, `status` (read-only db, no daemon), `once` (one status JSON, no db write, no pledge). Flags `-c`, `-d`, `-l`. Unknown config keys are rejected. `db=pg` without `pg_db` is rejected.
+Commands: `sld` (daemon), `sld -F` (foreground), `sld -n` (config check), `slctl init`, `slctl status` (read-only db), `slctl once` (one status JSON, no db write, no pledge). Flags `-c`, `-d`, `-l`. `slctl init` refuses uid 0 with `slctl: doas -u _sl slctl init`. Unknown config keys are rejected. `db=pg` without `pg_db` is rejected.
 
-`rc.d/slmon` is an example. Edit the path before installing. `start` stays in the foreground.
+`rc.d/sld` is `/etc/rc.d/sld` when installed. `daemon=/usr/local/sbin/sld`, `daemon_user=_sl`, `daemon_flags="-c /etc/sl.conf"`, `pexp="sld: parent"`. `rc_bg` is unset because `sld` forks itself.
 
 ## Dish
 
@@ -48,7 +48,7 @@ Live map samples are about 123×123 little-endian floats: mostly `-1` (unmeasure
 
 ## Storage
 
-Default `./var/slmon.db` from a checkout (gitignored), else `~/.local/share/slmon/slmon.db`. WAL, `synchronous=NORMAL`, `busy_timeout=5000`, mode `0600`. Override with `-d`. PostgreSQL is `db=pg` plus `pg_*` keys. Dialect is confined to `SLMON::DB::SQLite` and `SLMON::DB::Pg`.
+Default database is `/var/sl/sl.db` (`db_path` in `/etc/sl.conf`). The directory is mode `0700`, owner `_sl:_sl`. `sld` does not create `/var/sl`. WAL, `synchronous=NORMAL`, `busy_timeout=5000`, mode `0600`. Override with `-d`. PostgreSQL is `db=pg` plus `pg_*` keys. Dialect is confined to `SLMON::DB::SQLite` and `SLMON::DB::Pg`.
 
 Time columns used by queries: `history_samples.ts`, `metrics.ts`, `metrics_minutely.ts_minute`, `metrics_hourly.ts_hour`, `metrics_daily.ts_day`, `events.ts`, `dish_info.last_seen_ts`, `obstruction_map.ts`, `weather.ts`, `speedtests.ts`, `alert_queue.created_ts`. Query ops are only `latest` and `raw`. Obstruction SNR is returned as `snr_b64` (the blob is stripped). Row chunks over imsg are about 200000 bytes.
 
@@ -93,9 +93,9 @@ A process started before a code change keeps the old HTTP behavior until that pr
 
 ## Regress and build
 
-`make regress` (builds `ext/imsg` and `ext/dishbridge`, then `bsd.regress.mk`). Targets: unit, imsg, dish pledge, sqlite db, postgres db, sqlite e2e, postgres e2e, live. Postgres targets `initdb` a private cluster and remove it. Missing `initdb` or `DBD::Pg` fails those targets. Live target probes `192.168.100.1:9200` with `nc -z -w 2`, then `slmon once`, and should pass on this host rather than skip.
+`make regress` (builds `ext/imsg` and `ext/dishbridge`, then `bsd.regress.mk`). Targets: unit, imsg, dish pledge, sqlite db, postgres db, sqlite e2e, postgres e2e, daemon, live. Postgres targets `initdb` a private cluster and remove it. Missing `initdb` or `DBD::Pg` fails those targets. The daemon target uses a temp `-d` path and does not create `/var/sl` or read `/etc/sl.conf`. Live target probes `192.168.100.1:9200` with `nc -z -w 2`, then `slctl once`, and should pass on this host rather than skip. The link rules rename `Imsg.so` and `Dish.so` into place so a running collector keeps the old inode.
 
-`regress/unit.pl` puts both `../lib` and `../blib` on `@INC`. `SLMON::Http` loads the `SLMON::Imsg` XS at compile time. `perl -c` of an HTTP module needs `-Ilib -Iblib`. Last full `make regress` after the install button was green, including a live status document.
+`regress/unit.pl` puts both `../lib` and `../blib` on `@INC`. `SLMON::Http` loads the `SLMON::Imsg` XS at compile time. `perl -c` of an HTTP module needs `-Ilib -Iblib`. Last full `make regress` after the `sld` / `slctl` split was green: 113 unit tests, the daemon target, both end-to-end drivers, and a live status document.
 
 `CFLAGS`/`CXXFLAGS` arrive as `-O2 -pipe`, so the Makefile uses `+= -fPIC`. Generated `ext/dishbridge/gen/` and `blib/` are gitignored. `protoc` and `/usr/local/bin/grpc_cpp_plugin`. Perl sources use tabs. Comments only for a non-obvious constraint.
 

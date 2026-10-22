@@ -319,7 +319,7 @@ sub _dash_load {
 		$obstr_from = 'metrics';
 	}
 	if (($ctx->{log_level} // '') eq 'debug') {
-		warn "slmon: dash range=$range table=$table tail=$tail rows="
+		warn "sld: dash range=$range table=$table tail=$tail rows="
 		    . scalar(@$series) . " obstr=$obstr_from obstr_rows="
 		    . scalar(@$obstruction) . "\n";
 	}
@@ -470,7 +470,7 @@ sub _handle_client {
 		});
 	};
 	if ($@) {
-		warn "slmon: http: $@";
+		warn "sld: http: $@";
 		$resp = _json_response(500, { error => 'internal' });
 	}
 	syswrite $cli, $resp if defined $resp;
@@ -484,17 +484,17 @@ sub run {
 	$SIG{TERM} = sub { exit 0 };
 	my $imsg = SLMON::Imsg->open(fileno($sock));
 	my $hello = $imsg->recv;
-	die "slmon: http: no config from db\n"
+	die "sld: http: no config from db\n"
 	    if !$hello || $hello->{type} != SLMON::IMSG_CONFIG;
 	my $doc = SLMON::json_decode($hello->{data}) || {};
-	my $secret = $doc->{session_secret} or die "slmon: http: session secret missing\n";
+	my $secret = $doc->{session_secret} or die "sld: http: session secret missing\n";
 	my $admin = $doc->{admin_user} // 'admin';
 	$cfg->{page_rev} = page_rev($cfg);
 	# localtime reads the zone file. Do it before the pledge locks the filesystem.
 	strftime('%H:%M', localtime($^T));
 	require OpenBSD::Pledge;
 	OpenBSD::Pledge::pledge('inet')
-	    or die "slmon: http pledge: $!\n";
+	    or die "sld: http pledge: $!\n";
 	my $rate = SLMON::Auth::rate_new();
 	while (1) {
 		my $rin = '';
@@ -512,7 +512,7 @@ sub run {
 		my $cli = $listen->accept;
 		next if !$cli;
 		eval { _handle_client($cli, $imsg, $secret, $admin, $rate, $cfg) };
-		warn "slmon: http client: $@" if $@;
+		warn "sld: http client: $@" if $@;
 		close $cli;
 	}
 }

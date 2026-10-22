@@ -157,3 +157,15 @@ PPCODE:
 	(void)hv_stores(hv, "fd", newSViv(passfd));
 	imsg_free(&im);
 	XPUSHs(sv_2mortal(newRV_noinc((SV *)hv)));
+
+void
+set_title(const char *title)
+CODE:
+	const char *msg = title;
+
+	/* This libc always prefixes the program name. setprogname makes
+	   that prefix "sld", so the title is exactly "sld: parent". */
+	setprogname("sld");
+	if (strncmp(title, "sld: ", 5) == 0)
+		msg = title + 5;
+	setproctitle("%s", msg);

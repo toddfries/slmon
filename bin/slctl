@@ -3,15 +3,23 @@
 use strict;
 use warnings;
 use FindBin;
-use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../blib";
+BEGIN {
+	my $lib = "$FindBin::Bin/../lib";
+	if (-f "$lib/SLMON.pm") {
+		require lib;
+		lib->import($lib, "$FindBin::Bin/../blib");
+	}
+}
 
 use SLMON ();
 use SLMON::Config;
 use SLMON::Parent;
 
+$SLMON::PROG = 'slctl';
+
 sub usage {
 	die <<"END";
-usage: slmon start|init|status|once [-c file] [-d db] [-l host:port]
+usage: slctl init|status|once [-c file] [-d db] [-l host:port]
 END
 }
 
@@ -23,29 +31,31 @@ while (@ARGV) {
 	my $arg = shift @ARGV;
 	if ($arg eq '-c') {
 		$file = shift @ARGV;
-		die "slmon: -c needs a path\n" if !defined $file;
+		die SLMON::err('-c needs a path') if !defined $file;
 	} elsif ($arg eq '-d') {
 		$db = shift @ARGV;
-		die "slmon: -d needs a path\n" if !defined $db;
+		die SLMON::err('-d needs a path') if !defined $db;
 	} elsif ($arg eq '-l') {
 		$listen = shift @ARGV;
-		die "slmon: -l needs host:port\n" if !defined $listen;
+		die SLMON::err('-l needs host:port') if !defined $listen;
 	} else {
-		die "slmon: unknown argument $arg\n";
+		die SLMON::err("unknown argument $arg");
 	}
 }
 
-my $root = "$FindBin::Bin/..";
+if ($cmd eq 'init') {
+	my $refused = SLMON::Parent::init_refused($>);
+	die "$refused\n" if $refused;
+}
+
 my $cfg = SLMON::Config::load_file($file);
 SLMON::Config::apply_paths($cfg,
 	db_path => $db,
 	listen  => $listen,
-	root    => $root,
 );
+$cfg->{_file} = $file if defined $file && $file ne '';
 
-if ($cmd eq 'start') {
-	SLMON::Parent::run($cfg);
-} elsif ($cmd eq 'init') {
+if ($cmd eq 'init') {
 	SLMON::Parent::run($cfg, init_only => 1);
 } elsif ($cmd eq 'status') {
 	exit SLMON::Parent::status($cfg);

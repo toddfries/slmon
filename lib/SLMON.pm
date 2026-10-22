@@ -6,6 +6,9 @@ use warnings;
 use JSON::PP ();
 
 our $VERSION = '0.1.0';
+our $PROG = 'sld';
+# Foreground and slctl keep stderr. The daemon clears this after it forks.
+our $LOG_STDERR = 1;
 
 use constant {
 	IMSG_NEED_INIT    => 1,
@@ -27,6 +30,7 @@ use constant {
 	IMSG_ACK          => 17,
 	IMSG_LOGIN        => 18,
 	IMSG_LOGIN_RESULT => 19,
+	IMSG_RELOAD       => 20,
 	IMSG_MAX          => 262144,
 	# Fastest dish poll and page timer. The default poll stays 30s.
 	MIN_POLL_S        => 2,
@@ -48,7 +52,53 @@ sub json_decode {
 
 sub proc_title {
 	my ($role) = @_;
-	$0 = "slmon: $role";
+	require SLMON::Imsg;
+	# $0 is reported as "perl: sld: …". set_title uses setprogname so
+	# the process title is exactly "sld: $role" for pgrep -xf.
+	SLMON::Imsg::set_title("sld: $role");
+	return;
+}
+
+# Operator line, with the program name. A trailing newline is added.
+sub err {
+	my ($msg) = @_;
+	$msg =~ s/\s+\z//;
+	return "$PROG: $msg\n";
+}
+
+sub _syslog {
+	my ($msg) = @_;
+	eval {
+		require Sys::Syslog;
+		Sys::Syslog::setlogsock('native');
+		Sys::Syslog::openlog('sld', 'ndelay,pid', 'daemon');
+		Sys::Syslog::syslog('info', '%s', $msg);
+	};
+	return;
+}
+
+# Stderr while foreground. Syslog after the daemon has forked.
+sub op {
+	my ($msg) = @_;
+	return if $SLMON::IN_OP;
+	local $SLMON::IN_OP = 1;
+	$msg =~ s/\s+\z//;
+	if ($LOG_STDERR) {
+		print STDERR "$PROG: $msg\n";
+	} else {
+		_syslog($msg);
+	}
+	return;
+}
+
+# The uninitialized-database refusal is shown and logged before the fork.
+sub op_both {
+	my (@msg) = @_;
+	for my $msg (@msg) {
+		$msg =~ s/\s+\z//;
+		print STDERR "$PROG: $msg\n";
+		_syslog($msg);
+	}
 	return;
 }
 
@@ -59,14 +109,9 @@ sub bool01 {
 	return $v ? 1 : 0;
 }
 
-# Checkout default sits next to lib/. Otherwise the per-user data dir.
+# Installed default. -d overrides this. The port creates the directory.
 sub default_db_path {
-	my ($root) = @_;
-	if (defined $root && -f "$root/lib/SLMON.pm") {
-		return "$root/var/slmon.db";
-	}
-	my $home = $ENV{HOME} || '/tmp';
-	return "$home/.local/share/slmon/slmon.db";
+	return '/var/sl/sl.db';
 }
 
 1;

@@ -15,7 +15,7 @@ my $down = SLMON::DishProc::rpc_warn(
 	'192.168.100.1:9200',
 	"status rpc: Deadline Exceeded at /home/todd/git/sw/slmon/lib/SLMON/DishProc.pm line 117.\n",
 );
-die "deadline message: $down" if $down ne "slmon: dish: 192.168.100.1:9200 does not answer\n";
+die "deadline message: $down" if $down ne "sld: dish: 192.168.100.1:9200 does not answer\n";
 
 SLMON::DishProc::_try_pledge();
 if (open my $fh, '<', '/etc/passwd') {

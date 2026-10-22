@@ -16,16 +16,16 @@ use SLMON::StatusMap;
 
 # gRPC reports an unreachable dish as a deadline or a failed connect, and
 # croak appends a source location. The operator message is the same fact
-# slmon once prints.
+# slctl once prints.
 sub rpc_warn {
 	my ($target, $err) = @_;
 	$err //= '';
 	$err =~ s/\s+at \S+ line \d+\.?//g;
 	$err =~ s/\s+\z//;
 	if ($err =~ /Deadline Exceeded|failed to connect|Connection refused|Connection timed out/i) {
-		return "slmon: dish: $target does not answer\n";
+		return "sld: dish: $target does not answer\n";
 	}
-	return "slmon: dish: $target: $err\n";
+	return "sld: dish: $target: $err\n";
 }
 
 sub _reachable {
@@ -108,16 +108,16 @@ sub _try_pledge {
 	);
 	for my $path (@read) {
 		if (!OpenBSD::Unveil::unveil($path, 'r')) {
-			warn "slmon: dish unveil $path: $! (left unpledged)\n";
+			warn "sld: dish unveil $path: $! (left unpledged)\n";
 			return;
 		}
 	}
 	if (!OpenBSD::Unveil::unveil()) {
-		warn "slmon: dish unveil lock: $! (left unpledged)\n";
+		warn "sld: dish unveil lock: $! (left unpledged)\n";
 		return;
 	}
 	if (!OpenBSD::Pledge::pledge(qw(inet dns prot_exec rpath))) {
-		warn "slmon: dish pledge failed: $! (left unpledged)\n";
+		warn "sld: dish pledge failed: $! (left unpledged)\n";
 	}
 	return;
 }
@@ -147,7 +147,7 @@ sub run {
 		last if $wake && $wake->{type} == SLMON::IMSG_SHUTDOWN;
 		my $now = time;
 		if (!_reachable($host, $port)) {
-			my $msg = "slmon: dish: $target does not answer\n";
+			my $msg = "sld: dish: $target does not answer\n";
 			warn $msg if $msg ne $reported;
 			$reported = $msg;
 			$next = time + $interval;
@@ -189,7 +189,7 @@ sub run {
 			warn $msg if $msg ne $reported;
 			$reported = $msg;
 		} elsif ($reported ne '') {
-			warn "slmon: dish: $target answered\n";
+			warn "sld: dish: $target answered\n";
 			$reported = '';
 		}
 		$next = time + $interval;

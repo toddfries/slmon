@@ -1,0 +1,120 @@
+.\"
+.Dd $Mdocdate: October 22 2026 $
+.Dt SL.CONF 5
+.Os
+.Sh NAME
+.Nm sl.conf
+.Nd Starlink dish monitor configuration
+.Sh DESCRIPTION
+.Nm
+is the configuration file for
+.Xr sld 8
+and
+.Xr slctl 8 .
+The installed path is
+.Pa /etc/sl.conf .
+Lines are
+.Li key = value .
+Blank lines and lines whose first non-whitespace character is
+.Ql #
+are ignored.
+Unknown keys are rejected.
+.Pp
+.Xr sld 8
+reads the file as user
+.Sy _sl .
+The file mode is 0640, owner
+.Sy root:_sl ,
+so a password stored in
+.Va pg_password
+is not world-readable.
+.Dv SIGHUP
+and
+.Ic rcctl reload sld
+read the file again.
+See
+.Xr sld 8
+for which keys apply immediately.
+.Pp
+Keys and their defaults:
+.Bl -tag -width "minutely_retention_days"
+.It Va db
+.Li sqlite
+or
+.Li pg .
+.It Va db_path
+.Pa /var/sl/sl.db .
+The SQLite file.
+Ignored when
+.Va db
+is
+.Li pg .
+.Fl d
+overrides it for one process.
+.It Va listen
+.Li 127.0.0.1:8080 .
+Must be
+.Li host:port .
+One line.
+The port is 0 or at least 1024.
+.It Va dish_host
+.Li 192.168.100.1 .
+A suffix
+.Li :port
+replaces the default port 9200.
+.It Va dish_interval_s
+.Li 30 .
+Minimum 2.
+.It Va log_level
+.Li info
+or
+.Li debug .
+.Li debug
+records rollup bucket counts and which table a chart read.
+The session secret, the password, and
+.Va pg_password
+are not logged.
+.It Va raw_retention_days
+.Li 90 .
+.It Va hourly_rollup_days
+.Li 365 .
+.It Va minutely_retention_days
+.Li 730 .
+.It Va rollup_interval_s
+.Li 60 .
+Minimum 1.
+.It Va ping_targets
+.Li 1.1.1.1,8.8.8.8 .
+Comma-separated hosts.
+.It Va ping_interval_s
+.Li 10 .
+.It Va disconnect_failures
+.Li 3 .
+.It Va spike_ms
+.Li 200 .
+.It Va spike_min_s
+.Li 30 .
+.It Va latitude , Va longitude
+Decimal degrees.
+Set both or neither.
+Setting both starts the weather process.
+.It Va pg_host , Va pg_port , Va pg_db , Va pg_user , Va pg_password
+PostgreSQL connection.
+.Va pg_host
+is the directory of the local socket when it begins with a slash.
+.Va db No = Li pg
+requires
+.Va pg_db .
+.El
+.Sh FILES
+.Bl -tag -width Ds
+.It Pa /etc/sl.conf
+The file
+.Xr sld 8
+is started with.
+.It Pa /usr/local/share/examples/slmon/sl.conf
+Sample installed with the package.
+.El
+.Sh SEE ALSO
+.Xr slctl 8 ,
+.Xr sld 8

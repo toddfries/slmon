@@ -14,7 +14,7 @@ sub _spread {
 sub _debug {
 	my ($cfg, $msg) = @_;
 	return if !ref $cfg || ($cfg->{log_level} // '') ne 'debug';
-	warn "slmon: $msg\n";
+	warn "sld: $msg\n";
 	return;
 }
 

@@ -61,14 +61,14 @@ Build in this order. Each step is usable before the next one starts. Windows, re
 
 8. **CSV.** An authenticated download of the finest tier that still exists for the selected window. No purge button in this phase. Aging policy is phase 4.
 
-9. **First hook: notify.** A `slmon: notify` child drains `alert_queue` over imsg. It does not open the database. It starts only when `notify` is non-empty. The same change adds the contract to `man/man8/slmon.8` and a short pointer in the README. The manual is the writeup another person implements from. It states, in this tree's own words:
+9. **First hook: notify.** A `sld: notify` child drains `alert_queue` over imsg. It does not open the database. It starts only when `notify` is non-empty. The same change adds the contract to `man/man8/sld.8` and a short pointer in the README. The manual is the writeup another person implements from. It states, in this tree's own words:
 
     - The file is `lib/SLMON/Notify/<Name>.pm`, package `SLMON::Notify::<Name>`.
-    - `check($cfg)` runs at startup, before pledge, and dies with a `slmon:` line when a required `notify_<name>_*` key is missing or malformed.
+    - `check($cfg)` runs at startup, before pledge, and dies with a `sld:` line when a required `notify_<name>_*` key is missing or malformed.
     - `promises()` returns the pledge nouns this module needs. An empty list adds none.
     - `send($cfg, $event)` delivers one event. `$event` has `ts`, `type`, `duration_s`, and `text`. True means sent. False or an exception means that module failed. The module is not given a database handle.
     - The notify child, not the module, counts attempts. `notify_max_attempts` defaults to 8. One module's failure does not consume the others. A module past the cap is given up for that row.
-    - `slmon notify test` enqueues one synthetic event.
+    - `slctl notify test` enqueues one synthetic event.
     - Keys are `notify_<name>_<field>`. The parser accepts that shape only for names listed in `notify`. Any other unknown key is still an error.
 
     The manual's examples are the three modules below. They illustrate the contract. They are not the contract.
@@ -81,7 +81,7 @@ Build in this order. Each step is usable before the next one starts. Windows, re
 
 10. **Speed test, off by default.** A config key arms it. Nothing runs when the key is absent. Results go to `speedtests`. A finished run raises an event, which the notify hook delivers when a plugin is enabled.
 
-11. **`slmon top` and `GET /metrics`.** `slmon top` is a terminal view of the latest sample and the open events. `/metrics` is Prometheus text for the latest sample. It requires the session cookie. A config key may open it without a cookie on the listen lines; the default is closed. Neither one adds a window set.
+11. **`slctl top` and `GET /metrics`.** `slctl top` is a terminal view of the latest sample and the open events. `/metrics` is Prometheus text for the latest sample. It requires the session cookie. A config key may open it without a cookie on the listen lines; the default is closed. Neither one adds a window set.
 
 12. **More than one listen line.** The parent binds every `listen` value and the http child serves each socket that bound. IPv4 loopback and IPv6 loopback are both accepted in one file. Further local addresses are further lines. The man page shows the repeated key. Debug logs each bind with the address and the result.
 
@@ -141,7 +141,7 @@ A retain refuses to run when the clock has jumped more than `retain_clock_jump_s
 
 - A child whose pledge or unveil fails exits. It does not keep running with the pledge dropped. The parent restarts it. The notify child's promises are only those of the plugins actually enabled. A plugin that cannot reach its destination counts as a failed attempt. It does not drop the pledge.
 - Schema changes are explicit steps, not "create if not exists" hoping a new column appears on an old file.
-- Config file mode `0600` when `slmon` writes it. `pg_password` is not logged. `slmon once` stays available to the operator and is not written into the daemon log.
+- Config file mode `0600` when `sld` writes it. `pg_password` is not logged. `slctl once` stays available to the operator and is not written into the daemon log.
 - Login and logout forms carry a token tied to the session secret, so a page on another origin cannot post them.
 - Nothing is added to the default listen line. Extra addresses exist only where the operator wrote them. This phase does not add TLS or a second user.
 - Disk full, a locked database, and a dish that stays down are already non-fatal to the parent. Add regress coverage that the parent is still up after each of those, and that a full disk does not leave a half-applied retain.

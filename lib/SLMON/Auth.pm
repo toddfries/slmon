@@ -3,6 +3,7 @@ package SLMON::Auth;
 use strict;
 use warnings;
 
+use SLMON ();
 use Digest::SHA qw(hmac_sha256_hex);
 use MIME::Base64 qw(encode_base64 decode_base64);
 use POSIX ();
@@ -177,19 +178,19 @@ sub prompt {
 	$| = 1;
 	select $prev;
 	if (!-t $in) {
-		die "slmon: no admin password is set. Run `slmon init` or `slmon start` from a terminal.\n";
+		die SLMON::err('admin prompt needs a terminal');
 	}
 	while (1) {
 		print $out "Admin user [admin]: ";
 		my $user = _read_line($in, $out, 1);
-		die "slmon: end of input during admin prompt\n" if !defined $user;
+		die SLMON::err('end of input during admin prompt') if !defined $user;
 		$user = 'admin' if $user eq '';
 		print $out "Password: ";
 		my $pw = _read_line($in, $out, 0);
-		die "slmon: end of input during admin prompt\n" if !defined $pw;
+		die SLMON::err('end of input during admin prompt') if !defined $pw;
 		print $out "Repeat password: ";
 		my $pw2 = _read_line($in, $out, 0);
-		die "slmon: end of input during admin prompt\n" if !defined $pw2;
+		die SLMON::err('end of input during admin prompt') if !defined $pw2;
 		if ($pw ne $pw2) {
 			print $out "passwords do not match\n";
 			next;

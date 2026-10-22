@@ -1,5 +1,5 @@
 REGRESS_TARGETS = run-unit run-imsg run-dish-pledge run-db-sqlite run-db-pg \
-	run-e2e-sqlite run-e2e-pg run-live
+	run-e2e-sqlite run-e2e-pg run-daemon run-live
 
 PERL = /usr/bin/perl
 ROOT = ${.CURDIR:H}
@@ -31,9 +31,12 @@ run-e2e-sqlite: ptyfeed
 run-e2e-pg: ptyfeed
 	cd ${ROOT} && PERL5LIB=lib:blib ${PERL} regress/e2e.pl pg
 
+run-daemon: ptyfeed
+	cd ${ROOT} && PERL5LIB=lib:blib ${PERL} regress/daemon.pl
+
 run-live:
 	@if nc -z -w 2 192.168.100.1 9200; then \
-		cd ${ROOT} && PERL5LIB=lib:blib ${PERL} bin/slmon once \
+		cd ${ROOT} && PERL5LIB=lib:blib ${PERL} bin/slctl once \
 		    | grep '"status"'; \
 	else \
 		echo "SKIP live dish: 192.168.100.1:9200 does not answer" >&2; \

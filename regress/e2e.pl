@@ -26,7 +26,7 @@ my $pty_pid;
 my $daemon_pid;
 
 sub dump_logs {
-	for my $name ('pty.err', 'second.err', 'second.out', 'pg.log') {
+	for my $name ('pty.err', 'first.err', 'first.out', 'second.err', 'second.out', 'pg.log') {
 		my $path = "$work/$name";
 		next if !-f $path;
 		print STDERR "----- $name -----\n";
@@ -67,7 +67,7 @@ sub slmon_alive {
 	open my $ps, '-|', 'ps', '-axo', 'pid,command' or die "ps: $!";
 	while (my $line = <$ps>) {
 		next if index($line, $needle) < 0;
-		return 1 if $line =~ /slmon|fakedish/;
+		return 1 if $line =~ /sld:|fakedish/;
 	}
 	close $ps;
 	return 0;
@@ -187,7 +187,7 @@ if ($pty_pid == 0) {
 	open STDOUT, '>&', $out_w or die "stdout: $!";
 	open STDERR, '>', "$work/pty.err" or die "stderr: $!";
 	exec "$root/regress/ptyfeed", "$work/prompt.script",
-	    $^X, "$root/bin/slmon", 'start', '-c', "$work/ok.conf", '-d', $db;
+	    $^X, "$root/bin/slctl", 'init', '-c', "$work/ok.conf", '-d', $db;
 	die "exec ptyfeed: $!";
 }
 close $out_w;
@@ -195,6 +195,25 @@ close $in_r;
 my $pid_line = <$out_r>;
 die "ptyfeed did not report a pid\n" if !defined $pid_line || $pid_line !~ /PID\s+(\d+)/;
 $daemon_pid = $1;
+
+print $in_w "QUIT\n";
+close $in_w;
+waitpid $pty_pid, 0;
+my $st = $?;
+$pty_pid = 0;
+$daemon_pid = 0;
+die "init exit status $st\n" if $st != 0;
+
+my $first = fork();
+die "fork: $!" if !defined $first;
+if ($first == 0) {
+	open STDIN, '<', '/dev/null' or exit 1;
+	open STDOUT, '>', "$work/first.out" or exit 1;
+	open STDERR, '>', "$work/first.err" or exit 1;
+	exec $^X, "$root/bin/sld", '-F', '-c', "$work/ok.conf", '-d', $db;
+	exit 1;
+}
+$daemon_pid = $first;
 
 my $port = wait_port("$work/http.port", 20);
 my ($code, $body, $cookie) = http_req($port, 'POST', '/api/login',
@@ -265,11 +284,9 @@ while (time < $deadline) {
 }
 die "watchdog success did not show up in events\n" if !$saw_ok;
 
-print $in_w "QUIT\n";
-close $in_w;
-waitpid $pty_pid, 0;
-my $st = $?;
-$pty_pid = 0;
+kill 'TERM', $first;
+waitpid $first, 0;
+$st = $?;
 $daemon_pid = 0;
 die "first daemon exit status $st\n" if $st != 0;
 die "children still running after SIGTERM\n" if slmon_alive($db);
@@ -290,7 +307,7 @@ if ($second == 0) {
 	open STDIN, '<', '/dev/null' or exit 1;
 	open STDOUT, '>', "$work/second.out" or exit 1;
 	open STDERR, '>', "$work/second.err" or exit 1;
-	exec $^X, "$root/bin/slmon", 'start', '-c', "$work/down.conf", '-d', $db;
+	exec $^X, "$root/bin/sld", '-F', '-c', "$work/down.conf", '-d', $db;
 	exit 1;
 }
 $daemon_pid = $second;

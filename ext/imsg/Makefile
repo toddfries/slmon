@@ -14,7 +14,9 @@ Imsg.o: Imsg.c
 
 ../../blib/auto/SLMON/Imsg/Imsg.so: Imsg.o
 	mkdir -p ../../blib/auto/SLMON/Imsg
-	${CC} -shared -fPIC -o $@ Imsg.o -lutil
+	# Rename into place so a running process keeps the old inode.
+	${CC} -shared -fPIC -o $@.new Imsg.o -lutil
+	mv $@.new $@
 
 clean:
 	rm -f Imsg.c Imsg.o ../../blib/auto/SLMON/Imsg/Imsg.so

@@ -20,7 +20,7 @@ sub connect {
 	my ($cfg, %opt) = @_;
 	require DBD::Pg;
 	my $db = $cfg->{pg_db};
-	die "slmon: pg_db is required\n" if !defined $db || $db eq '';
+	die "sld: pg_db is required\n" if !defined $db || $db eq '';
 	my $dsn = "dbi:Pg:dbname=$db";
 	$dsn .= ";host=$cfg->{pg_host}" if defined $cfg->{pg_host} && $cfg->{pg_host} ne '';
 	$dsn .= ";port=$cfg->{pg_port}" if defined $cfg->{pg_port} && $cfg->{pg_port} ne '';

@@ -34,8 +34,10 @@ spacex_device.grpc.pb.o: ${GEN}/spacex_device.grpc.pb.cc
 
 ../../blib/auto/SLMON/Dish/Dish.so: Dish.o dishbridge.o spacex_device.pb.o spacex_device.grpc.pb.o
 	mkdir -p ../../blib/auto/SLMON/Dish
-	${CXX} -shared -fPIC -o $@ Dish.o dishbridge.o spacex_device.pb.o \
+	# Rename into place so a running process keeps the old inode.
+	${CXX} -shared -fPIC -o $@.new Dish.o dishbridge.o spacex_device.pb.o \
 	    spacex_device.grpc.pb.o ${GRPC_LIBS}
+	mv $@.new $@
 
 clean:
 	rm -rf ${GEN} Dish.c *.o ../../blib/auto/SLMON/Dish/Dish.so
