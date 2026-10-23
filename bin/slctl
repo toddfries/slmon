@@ -19,7 +19,7 @@ $SLMON::PROG = 'slctl';
 
 sub usage {
 	die <<"END";
-usage: slctl init|status|once [-c file] [-d db] [-l host:port]
+usage: slctl init|passwd|status|once [-c file] [-d db] [-l host:port]
 END
 }
 
@@ -43,8 +43,8 @@ while (@ARGV) {
 	}
 }
 
-if ($cmd eq 'init') {
-	my $refused = SLMON::Parent::init_refused($>);
+if ($cmd eq 'init' || $cmd eq 'passwd') {
+	my $refused = SLMON::Parent::init_refused($>, $cmd);
 	die "$refused\n" if $refused;
 }
 
@@ -57,6 +57,9 @@ $cfg->{_file} = $file if defined $file && $file ne '';
 
 if ($cmd eq 'init') {
 	SLMON::Parent::run($cfg, init_only => 1);
+} elsif ($cmd eq 'passwd') {
+	my $how = SLMON::Parent::run($cfg, passwd_only => 1);
+	exit($how eq 'reset' ? 0 : 1);
 } elsif ($cmd eq 'status') {
 	exit SLMON::Parent::status($cfg);
 } elsif ($cmd eq 'once') {

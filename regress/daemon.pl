@@ -26,7 +26,7 @@ my $starter_pid = 0;
 
 sub dump_logs {
 	for my $name ('uninit.err', 'bad.err', 'low.err', 'pty.err',
-	    'init2.out', 'sld.out', 'sld.err') {
+	    'passwd.err', 'init2.out', 'sld.out', 'sld.err') {
 		my $path = "$work/$name";
 		next if !-f $path;
 		print STDERR "----- $name -----\n";
@@ -159,14 +159,20 @@ sub wait_dish_pid {
 	die "dish pid did not change from $old\n";
 }
 
-sub admin_hash {
+sub admin_settings {
 	my ($db) = @_;
 	my $cfg = SLMON::Config::parse("db = sqlite\n");
 	SLMON::Config::apply_paths($cfg, db_path => $db);
 	my $dbh = SLMON::DB::open_db($cfg, readonly => 1);
 	my $row = SLMON::DB::settings($dbh);
 	$dbh->disconnect;
-	return $row && $row->{admin_pass_hash} ? $row->{admin_pass_hash} : '';
+	return $row || {};
+}
+
+sub admin_hash {
+	my ($db) = @_;
+	my $row = admin_settings($db);
+	return $row->{admin_pass_hash} ? $row->{admin_pass_hash} : '';
 }
 
 sub log_grew {
@@ -211,6 +217,10 @@ my $refused = SLMON::Parent::init_refused(0);
 die "root init line [$refused]\n"
     if ($refused // '') ne 'slctl: doas -u _sl slctl init';
 die "non-root init was refused\n" if defined SLMON::Parent::init_refused(1);
+my $prefused = SLMON::Parent::init_refused(0, 'passwd');
+die "root passwd line [$prefused]\n"
+    if ($prefused // '') ne 'slctl: doas -u _sl slctl passwd';
+die "non-root passwd was refused\n" if defined SLMON::Parent::init_refused(1, 'passwd');
 
 my $db = "$work/sl.db";
 my $other = "$work/other.db";
@@ -239,6 +249,23 @@ S regress-secret
 W Repeat password:
 S regress-secret
 END
+write_file("$work/passwd.script", <<'END');
+W Admin user
+S operator
+W Password:
+S new-secret
+W Repeat password:
+S new-secret
+W admin user reset
+W rcctl restart sld
+END
+
+my $absent = "$work/absent.db";
+($st, $out) = run_capture($^X, "$root/bin/slctl", 'passwd', '-c', $conf, '-d', $absent);
+die "passwd on a missing database status $st\n[$out]\n" if $st == 0;
+die "passwd missing text:\n[$out]\n"
+    if $out ne "slctl: $absent is not initialized\nslctl: doas -u _sl slctl init\n";
+die "passwd created $absent\n" if -e $absent;
 
 $ENV{SLMON_DISH_CMD} = "$root/regress/fakedish.pl";
 $ENV{SLMON_FAKE_LOG} = $log;
@@ -276,6 +303,49 @@ die "second init status $st\n[$out]\n" if $st != 0;
 die "second init text:\n[$out]\n" if $out !~ /slctl: already initialized\n/;
 my $hash2 = admin_hash($db);
 die "second init changed the password\n" if $hash2 ne $hash;
+
+my $before = admin_settings($db);
+pipe(my $pw_r, my $pw_w) or die "pipe: $!";
+pipe(my $pwin_r, my $pwin_w) or die "pipe: $!";
+my $pw_pid = fork();
+die "fork: $!" if !defined $pw_pid;
+if ($pw_pid == 0) {
+	close $pw_r;
+	close $pwin_w;
+	open STDIN, '<&', $pwin_r or die "stdin: $!";
+	open STDOUT, '>&', $pw_w or die "stdout: $!";
+	open STDERR, '>', "$work/passwd.err" or die "stderr: $!";
+	exec "$root/regress/ptyfeed", "$work/passwd.script",
+	    $^X, "$root/bin/slctl", 'passwd', '-c', $conf, '-d', $db;
+	die "exec ptyfeed: $!";
+}
+close $pw_w;
+close $pwin_r;
+my $pw_line = <$pw_r>;
+die "passwd ptyfeed did not report a pid\n" if !defined $pw_line || $pw_line !~ /PID\s+(\d+)/;
+print $pwin_w "QUIT\n";
+close $pwin_w;
+waitpid $pw_pid, 0;
+$st = $?;
+close $pw_r;
+die "passwd exit status $st\n" if $st != 0;
+my $after = admin_settings($db);
+die "passwd kept the user\n" if ($after->{admin_user} // '') ne 'operator';
+die "passwd kept the password\n" if ($after->{admin_pass_hash} // '') eq $hash;
+die "passwd kept the session key\n"
+    if ($after->{session_secret} // '') eq ($before->{session_secret} // '');
+die "old password still matches\n"
+    if SLMON::Auth::verify_password('regress-secret', $after->{admin_pass_hash});
+die "new password does not match\n"
+    if !SLMON::Auth::verify_password('new-secret', $after->{admin_pass_hash});
+my $old_cookie = SLMON::Auth::sign_session('admin', time + 100, $before->{session_secret});
+die "old cookie still verifies\n"
+    if defined SLMON::Auth::verify_session($old_cookie, $after->{session_secret}, time);
+$hash = $after->{admin_pass_hash};
+($st, $out) = run_capture($^X, "$root/bin/slctl", 'init', '-c', $conf, '-d', $db);
+die "init after passwd status $st\n[$out]\n" if $st != 0;
+die "init after passwd text:\n[$out]\n" if $out !~ /slctl: already initialized\n/;
+die "init after passwd changed the password\n" if admin_hash($db) ne $hash;
 
 my $probe = IO::Socket::INET->new(
 	LocalAddr => '127.0.0.1',

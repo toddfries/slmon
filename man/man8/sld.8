@@ -65,12 +65,15 @@ discards that standard error.
 The log lines are the record after boot.
 Create the database with
 .Xr slctl 8
+.Cm init
 as
 .Sy _sl ,
 then
 .Ic rcctl enable sld
 and
 .Ic rcctl start sld .
+.Cm passwd
+replaces the admin user and password later.
 .Pp
 .Fl F
 runs until

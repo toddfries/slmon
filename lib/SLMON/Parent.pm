@@ -32,10 +32,11 @@ END {
 	}
 }
 
-# uid 0 must not initialize. The binary prints this and exits.
+# uid 0 must not initialize or replace the admin login.
 sub init_refused {
-	my ($uid) = @_;
-	return 'slctl: doas -u _sl slctl init' if defined $uid && $uid == 0;
+	my ($uid, $cmd) = @_;
+	$cmd = 'init' if !defined $cmd || $cmd eq '';
+	return "slctl: doas -u _sl slctl $cmd" if defined $uid && $uid == 0;
 	return undef;
 }
 
@@ -122,18 +123,11 @@ sub _daemonize {
 	return;
 }
 
-sub _handshake {
+sub _set_auth {
 	my ($ctl) = @_;
-	my $first = $ctl->recv;
-	die SLMON::err('db closed during startup') if !$first;
-	if ($first->{type} == SLMON::IMSG_READY) {
-		return 'ready';
-	}
-	if ($first->{type} != SLMON::IMSG_NEED_INIT) {
-		die SLMON::err("unexpected startup message $first->{type}");
-	}
 	my ($user, $pw) = SLMON::Auth::prompt();
 	my $hash = SLMON::Auth::hash_password($pw);
+	# A new key drops cookies signed with the previous one after restart.
 	my $secret = SLMON::Auth::session_secret();
 	$ctl->send(SLMON::IMSG_SET_AUTH, SLMON::json_encode({
 		user            => $user,
@@ -143,6 +137,27 @@ sub _handshake {
 	my $ready = $ctl->recv;
 	die SLMON::err('db did not become ready')
 	    if !$ready || $ready->{type} != SLMON::IMSG_READY;
+	return;
+}
+
+sub _handshake {
+	my ($ctl, $replace) = @_;
+	my $first = $ctl->recv;
+	die SLMON::err('db closed during startup') if !$first;
+	if ($first->{type} == SLMON::IMSG_READY) {
+		if (!$replace) {
+			return 'ready';
+		}
+		_set_auth($ctl);
+		return 'reset';
+	}
+	if ($first->{type} != SLMON::IMSG_NEED_INIT) {
+		die SLMON::err("unexpected startup message $first->{type}");
+	}
+	if ($replace) {
+		return 'missing';
+	}
+	_set_auth($ctl);
 	return 'created';
 }
 
@@ -400,7 +415,9 @@ sub run {
 		$cfg->{state_dir} = $1;
 	}
 	umask 0077;
-	if (!$opt{init_only}) {
+	if ($opt{passwd_only}) {
+		_require_initialized($cfg);
+	} elsif (!$opt{init_only}) {
 		_require_initialized($cfg);
 		_daemonize() if !$opt{foreground};
 	}
@@ -426,7 +443,7 @@ sub run {
 	close $dctl;
 	my $ctl = SLMON::Imsg->open(fileno($pctl));
 	$CTL_FD = fileno($pctl);
-	my $how = eval { _handshake($ctl) };
+	my $how = eval { _handshake($ctl, $opt{passwd_only} ? 1 : 0) };
 	if ($@) {
 		my $err = $@;
 		kill 'TERM', $dbpid;
@@ -435,11 +452,22 @@ sub run {
 		$DBPID = undef;
 		die $err;
 	}
-	if ($opt{init_only}) {
-		if ($how eq 'ready') {
-			print SLMON::err('already initialized');
+	if ($opt{init_only} || $opt{passwd_only}) {
+		if ($opt{init_only}) {
+			if ($how eq 'ready') {
+				print SLMON::err('already initialized');
+			} else {
+				print SLMON::err('admin password saved');
+			}
+		} elsif ($how eq 'reset') {
+			print SLMON::err('admin user reset');
+			print SLMON::err('rcctl restart sld');
 		} else {
-			print SLMON::err('admin password saved');
+			my $what = ($cfg->{db} // '') eq 'pg'
+			    ? ($cfg->{pg_db} || 'pg')
+			    : $cfg->{db_path};
+			print SLMON::err("$what is not initialized");
+			print SLMON::err('doas -u _sl slctl init');
 		}
 		$ctl->send(SLMON::IMSG_SHUTDOWN, '{}');
 		waitpid $dbpid, 0;

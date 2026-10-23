@@ -7,7 +7,7 @@
 .Nd control the Starlink dish monitor
 .Sh SYNOPSIS
 .Nm slctl
-.Cm init Ns | Ns Cm status Ns | Ns Cm once
+.Cm init Ns | Ns Cm passwd Ns | Ns Cm status Ns | Ns Cm once
 .Op Fl c Ar file
 .Op Fl d Ar db
 .Op Fl l Ar host:port
@@ -42,13 +42,44 @@ It is stored with
 bcrypt
 .Pq Li $2b$ .
 A 32-byte session key is read from
-.Pa /dev/urandom
-once and is not rotated later.
+.Pa /dev/urandom .
+.Nm sld
+does not rotate that key while it is running.
 A second
 .Cm init
 prints that the database is already initialized and does not change
 the password.
 The prompt needs a terminal.
+.It Cm passwd
+Replace the admin user, the password, and the session key on a
+database that
+.Cm init
+has already created.
+Refuses uid 0 with the line
+.Bd -literal -offset indent
+slctl: doas -u _sl slctl passwd
+.Ed
+.Pp
+The prompts and the password rules are the same as
+.Cm init .
+An empty user name stores
+.Li admin .
+On success it prints
+.Bd -literal -offset indent
+slctl: admin user reset
+slctl: rcctl restart sld
+.Ed
+.Pp
+Existing login cookies stay valid until
+.Nm sld
+is restarted, because the running process still holds the previous
+session key.
+A database that is not initialized is left untouched, and the command
+prints the same
+.Cm init
+hint
+.Nm sld
+prints.
 .It Cm status
 Print whether the database is initialized, which driver is configured,
 the database path, the dish host, the HTTP port, and how many history
@@ -100,6 +131,9 @@ is not used.
 .Cm init
 exits non-zero when run as root, when the prompt cannot be read,
 or when the database directory is missing.
+.Cm passwd
+exits non-zero in those cases and when the database is not
+initialized.
 .Cm status
 exits non-zero when the database cannot be opened.
 .Cm once

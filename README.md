@@ -26,7 +26,11 @@ doas -u _sl slctl status
 slctl once
 ```
 
+`doas -u _sl slctl passwd` replaces the admin user and password on a
+database that init already created, and replaces the session key.
+Restart with `rcctl restart sld` so an existing login stops working.
 `slctl init` as root prints `slctl: doas -u _sl slctl init` and exits.
+`slctl passwd` as root prints `slctl: doas -u _sl slctl passwd` and exits.
 `sld` before that init prints:
 
 ```
