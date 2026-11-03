@@ -112,3 +112,7 @@ XS: on Perl 5.42 `sv_setref_pv` stores an IV; the XS checks `SvIOK` and uses `IN
 Dish is bridged through an OpenBSD firewall. `arm0` routes `192.168.100.1` via the Starlink gateway `100.64.0.1` on `vlan6`. The monitor host's `re0` is `10.1.5.35`, gateway `10.1.5.1`. `192.168.100.1:9200` and `:9201` answer. Do not print the dish serial in replies or docs.
 
 Do not `pkg_add` or `doas` from an agent session. `grpc` was already present for the build. Do not install a second gRPC stack.
+
+## 2026-11-02 phase 2 step 5
+
+Step 4 is in the tree: the boresight ring and the outage calendar. Step 5 is the health score, weights drop 30, latency 25, obstruction 20, uptime 15, alerts 10. Searched the plan, the crib, and the modules. Nothing maps a measurement onto those points. The score stays uncomputed until that mapping is written down. Step 6 is next after the score. Weather rows already exist when latitude and longitude are set: `SLMON::Weather::warning` returns `thunderstorm` for WMO 95, 96, or 99, `heavy snow` for 75 or 86, and `high wind` at 50 km/h or more. The dashboard card and the latency warning bands are the step 6 drawing, not this one.
