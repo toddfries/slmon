@@ -323,8 +323,23 @@ sub _rate_unit {
 	return (1, 'bit/s');
 }
 
+# North is up. Azimuth 0 is north and increases clockwise. Elevation 90 is
+# the center of the stored grid. Elevation 0 is the horizon at the edge.
+sub _bore_src {
+	my ($cols, $rows, $az, $el) = @_;
+	return if !defined $az || !defined $el;
+	return if $el < 0 || $el > 90;
+	return if $cols < 1 || $rows < 1;
+	my $cx = $cols / 2;
+	my $cy = $rows / 2;
+	my $reach = $cx < $cy ? $cx : $cy;
+	my $rad = (90 - $el) / 90 * $reach;
+	my $th = $az * atan2(1, 1) / 45;
+	return ($cx + $rad * sin($th), $cy - $rad * cos($th));
+}
+
 sub map_svg {
-	my ($row) = @_;
+	my ($row, $aim) = @_;
 	return '' if !$row;
 	my $rows = int($row->{num_rows} // 0);
 	my $cols = int($row->{num_cols} // 0);
@@ -359,8 +374,74 @@ sub map_svg {
 			    . ($r * $cell) . '" width="' . $cell . '" height="' . $cell . '"/>';
 		}
 	}
+	if (ref $aim eq 'HASH') {
+		my ($x, $y) = _bore_src($cols, $rows, _num($aim->{az}), _num($aim->{el}));
+		if (defined $x) {
+			my $sx = $x / $step * $cell;
+			my $sy = $y / $step * $cell;
+			my $w = $ocols * $cell;
+			my $h = $orows * $cell;
+			$sx = 0 if $sx < 0;
+			$sy = 0 if $sy < 0;
+			$sx = $w if $sx > $w;
+			$sy = $h if $sy > $h;
+			$svg .= '<circle class="bore" cx="' . sprintf('%.1f', $sx)
+			    . '" cy="' . sprintf('%.1f', $sy) . '" r="3.5"/>';
+		}
+	}
 	$svg .= '</svg>';
 	return $svg;
+}
+
+# Outages in the selected window. ping_ok is a sample, not an outage.
+sub calendar_svg {
+	my ($events, $from, $to) = @_;
+	my @out;
+	for my $row (@{ $events || [] }) {
+		my $type = $row->{type} // '';
+		next if $type eq '' || $type eq 'ping_ok';
+		my $ts = _num($row->{ts});
+		next if !defined $ts;
+		my $dur = _num($row->{duration_s});
+		$dur = 0 if !defined $dur || $dur < 0;
+		push @out, { ts => $ts, end => $ts + $dur, type => $type };
+	}
+	my $empty = '<svg class="calendar" viewBox="0 0 640 48" role="img">'
+	    . '<title>Outage calendar</title>'
+	    . '<text class="empty" x="12" y="28">No outages in this window.</text></svg>';
+	my $lo = $from;
+	my $hi = $to;
+	if (!defined $lo) {
+		for my $e (@out) {
+			$lo = $e->{ts} if !defined $lo || $e->{ts} < $lo;
+		}
+	}
+	if (!defined $hi) {
+		for my $e (@out) {
+			$hi = $e->{end} if !defined $hi || $e->{end} > $hi;
+		}
+	}
+	return $empty if !defined $lo || !defined $hi || $hi <= $lo || !@out;
+	my $span = $hi - $lo;
+	my $w = 640;
+	my $body = '';
+	for my $e (@out) {
+		next if $e->{end} < $lo || $e->{ts} > $hi;
+		my $a = $e->{ts} < $lo ? $lo : $e->{ts};
+		my $b = $e->{end} > $hi ? $hi : $e->{end};
+		$b = $a + ($span / $w) if $b <= $a;
+		my $x = ($a - $lo) / $span * $w;
+		my $rw = ($b - $a) / $span * $w;
+		$rw = 1 if $rw < 1;
+		$body .= '<rect class="outage" x="' . sprintf('%.1f', $x)
+		    . '" y="16" width="' . sprintf('%.1f', $rw)
+		    . '" height="16"><title>' . _he($e->{type}) . '</title></rect>';
+	}
+	return $empty if $body eq '';
+	return '<svg class="calendar" viewBox="0 0 640 48" role="img">'
+	    . '<title>Outage calendar</title>'
+	    . '<rect class="calbg" x="0" y="16" width="640" height="16"/>'
+	    . $body . '</svg>';
 }
 
 sub _figure {
@@ -729,11 +810,13 @@ sub page {
 	if (defined $info->{device_id} && $info->{device_id} ne '') {
 		$id = '<p class="id">' . _he($info->{device_id}) . '</p>';
 	}
-	my $map = map_svg($d->{map});
+	my $map = map_svg($d->{map}, { az => $az, el => $el });
 	my $map_body;
 	if ($map ne '') {
+		my $bore = $map =~ /class="bore"/ ? ' The ring is the boresight.' : '';
 		$map_body = '<h2>Obstruction map</h2>'
-		    . '<p class="note">Gray is unmeasured, blue is clear, red is blocked.</p>'
+		    . '<p class="note">Gray is unmeasured, blue is clear, red is blocked.'
+		    . $bore . ' North is up.</p>'
 		    . $map;
 	} else {
 		$map_body = '<p class="note">No obstruction map stored.</p>';
@@ -803,6 +886,9 @@ sub page {
 	    . 'svg.obstruction .c{fill:#2f6f9f;stroke:none}'
 	    . 'svg.obstruction .o{fill:#9a3412;stroke:none}'
 	    . 'svg.obstruction .u{fill:#e6e6e6;stroke:none}'
+	    . 'svg.obstruction .bore{fill:none;stroke:#111;stroke-width:1.5}'
+	    . 'svg.calendar .calbg{fill:#f3f3f3;stroke:none}'
+	    . 'svg.calendar .outage{fill:#9a3412;stroke:none}'
 	    . '.error{color:#8a1f1f}'
 	    . '.cfg{padding-left:1.2rem;margin:0.4rem 0}'
 	    . '.cfg li{margin:0.15rem 0}'
@@ -836,7 +922,9 @@ sub page {
 	    . $alert
 	    . $map_body
 	    . '</section>'
-	    . '<section id="history"><h2>History</h2>' . $ev . '</section>'
+	    . '<section id="history"><h2>History</h2>'
+	    . _figure(calendar_svg($d->{events}, $from, $to))
+	    . $ev . '</section>'
 	    . $cfghtml
 	    . '</div>'
 	    . live_script()

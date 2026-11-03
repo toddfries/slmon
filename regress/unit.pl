@@ -597,8 +597,42 @@ my $raw = pack('f<*', -1, 1, 0, 1);
 my $map = SLMON::Dash::map_svg({
 	num_rows => 2, num_cols => 2, snr_b64 => MIME::Base64::encode_base64($raw, ''),
 });
-ok($map =~ /class="u"/ && $map =~ /class="c"/ && $map =~ /class="o"/,
+ok($map =~ /class="u"/ && $map =~ /class="c"/ && $map =~ /class="o"/
+    && $map !~ /class="bore"/,
     'obstruction map marks unmeasured, clear, and blocked cells');
+my $zenith = SLMON::Dash::map_svg({
+	num_rows => 2, num_cols => 2, snr_b64 => MIME::Base64::encode_base64($raw, ''),
+}, { az => 0, el => 90 });
+ok($zenith =~ /class="bore" cx="8.0" cy="8.0"/,
+    'zenith boresight is the center of the grid');
+my $north = SLMON::Dash::map_svg({
+	num_rows => 2, num_cols => 2, snr_b64 => MIME::Base64::encode_base64($raw, ''),
+}, { az => 0, el => 0 });
+ok($north =~ /class="bore" cx="8.0" cy="0.0"/,
+    'north horizon is the top edge of the grid');
+my $cal = SLMON::Dash::calendar_svg([
+	{ ts => 100, type => 'ping_ok' },
+	{ ts => 150, duration_s => 10, type => 'disconnect' },
+], 0, 200);
+ok($cal =~ /class="outage"/ && $cal =~ /disconnect/ && $cal !~ /ping_ok/,
+    'calendar draws an outage and skips ping_ok');
+my $quiet = SLMON::Dash::calendar_svg([
+	{ ts => 10, type => 'ping_ok' },
+], 0, 100);
+ok($quiet =~ /No outages in this window/,
+    'a window of only ping_ok has no outage mark');
+my $sky = SLMON::Dash::page({
+	user => 'ops',
+	now => 1000,
+	range => '24h',
+	latest => { direction_azimuth => 0, direction_elevation => 90, ts => 1000 },
+	map => { num_rows => 2, num_cols => 2, snr_b64 => MIME::Base64::encode_base64($raw, '') },
+	events => [ { ts => 900, duration_s => 5, type => 'disconnect' } ],
+});
+ok($sky =~ /id="dish"/ && $sky =~ /class="bore" cx="8.0" cy="8.0"/
+    && $sky =~ /The ring is the boresight/
+    && $sky =~ /id="history"/ && $sky =~ /class="outage"/,
+    'the page shows the boresight and the outage calendar');
 ok(join(' ', SLMON::StatusMap::alert_names(2)) eq 'motors_stuck',
     'alert bits decode to names');
 ok(SLMON::Dash::range_name('6h') eq '24h'

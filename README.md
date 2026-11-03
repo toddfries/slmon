@@ -107,8 +107,11 @@ target runs `slctl once` only when `192.168.100.1:9200` answers.
 `/` is one page. Overview is the latest downlink, uplink, latency, loss,
 obstruction, and uptime. Quality charts packet loss, latency, jitter, and
 obstruction. Throughput charts downlink and uplink. Dish shows identity,
-azimuth, elevation, SNR, alerts, and the obstruction grid. History lists
-recent events. The window is 24 hours (the default), 7 days, 30 days,
+azimuth, elevation, SNR, alerts, and the obstruction grid. The grid
+marks the boresight: north is up, azimuth 0 is north, elevation 90 is
+the center, and elevation 0 is the horizon. History opens with an
+outage calendar for the selected window, then lists recent events.
+`ping_ok` is not an outage. The window is 24 hours (the default), 7 days, 30 days,
 365 days, or the whole collection (`/?range=24h`, `7d`, `30d`, `365d`,
 `ever`). An unknown value is 24 hours. 24 hours uses the per-minute rollup.
 7 and 30 days use the hourly rollup. 365 days and the whole collection use

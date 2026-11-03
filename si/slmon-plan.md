@@ -51,7 +51,7 @@ Build in this order. Each step is usable before the next one starts. Windows, re
 
 3. **Refresh on the panels that exist.** Done for the current page: the series, the map, and the event list redraw in place on `dish_interval_s`, and the page reloads when `GET /health` reports a new `rev`. Sky, calendar, health, SLA, and weather join that same interval and revision check in the step that adds them.
 
-4. **Sky and calendar.** A sky view places the boresight on the stored obstruction grid. An outage calendar is one SVG drawn from `events` for the selected window.
+4. **Sky and calendar.** Done. `SLMON::Dash::map_svg` draws a ring on the stored grid when azimuth and elevation are known. North is up, azimuth 0 is north, elevation 90 is the center, and elevation 0 is the horizon. `SLMON::Dash::calendar_svg` is one SVG of outages in the selected window. `ping_ok` is not an outage. Both sit on the existing page refresh.
 
 5. **Health score.** One number, 0–100, for the selected window, with the factor breakdown: drop 30, latency 25, obstruction 20, uptime 15, alerts 10. Show the factors, not only the total.
 
