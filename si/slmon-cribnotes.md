@@ -2,7 +2,7 @@
 
 2026-10-18. Read this file before changing the tree. The chart page is commit `87a4e17`. Rollup obstruction and jitter are in the tree after that.
 
-Shared rules are `si/aibootstrap/behavior.md` and `si/aibootstrap/values.md`. This file overrides them for slmon. `si/aibootstrap` is a separate git repository. Do not add it to slmon's commits. `aihandbook` is a future name for that handbook, not a directory. The handbook text also says a later rename may be `sihandbook/`. Until a rename is on disk, read `si/aibootstrap/`.
+Shared rules are `si/agent-core/behavior.md` and `si/agent-core/values.md`. This file overrides them for slmon. `si/agent-core` is a separate git repository. Do not add it to slmon's commits.
 
 `man/man8/sld.8`, `man/man8/slctl.8`, `man/man5/sl.conf.5`, and `README.md` describe the tool as it runs. They do not describe phases or this conversation. The approved follow-on is `si/slmon-plan.md`. Steps 1 and 2 are in the tree: rollup rows store obstruction and jitter, and the page is one window across Overview, Quality, Throughput, Dish, and History. Do not start step 4 until that page is what the running process serves. Step 3 is already how this page refreshes. Later panels join that refresh when they are added.
 

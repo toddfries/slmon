@@ -8,7 +8,7 @@ Phase 1 is shipped and collecting. Commit `87a4e17` added the first dashboard: l
 
 Man pages and the README describe the tool as it is when a change lands. They do not carry this phase list.
 
-Still in force: no Docker, dish stays `192.168.100.1:9200`, the http child does not open the database, one admin, read RPCs only. UI stays inline HTML, SVG, and script from Perl. No static files and no CDN. The shared handbook is `si/aibootstrap/`. `aihandbook` is a future name for that directory, not a path.
+Still in force: no Docker, dish stays `192.168.100.1:9200`, the http child does not open the database, one admin, read RPCs only. UI stays inline HTML, SVG, and script from Perl. No static files and no CDN. The shared handbook is `si/agent-core/`.
 
 ## Decisions that bind every phase
 
