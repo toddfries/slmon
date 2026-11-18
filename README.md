@@ -28,6 +28,7 @@ slctl once
 
 `doas -u _sl slctl passwd` replaces the admin user and password on a
 database that init already created, and replaces the session key.
+It writes those settings and does not roll up stored samples.
 Restart with `rcctl restart sld` so an existing login stops working.
 `slctl init` as root prints `slctl: doas -u _sl slctl init` and exits.
 `slctl passwd` as root prints `slctl: doas -u _sl slctl passwd` and exits.
@@ -73,7 +74,8 @@ Three failures confirm a disconnect. A latency spike is a best RTT over
 
 ## PostgreSQL
 
-SQLite is the default (`p5-DBI`, `p5-DBD-SQLite`, WAL). For PostgreSQL:
+SQLite is the default (`p5-DBI`, `p5-DBD-SQLite`, WAL). Temporary tables
+stay in memory. For PostgreSQL:
 
 ```
 db = pg

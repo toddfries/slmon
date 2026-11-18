@@ -1,7 +1,7 @@
 # Local distfile for the OpenBSD wip port. The bake script is the build.
 name=slmon
 version=0.1
-revision=0
+revision=1
 category=net
 comment=unofficial Starlink dish monitor
 maintainer=Todd T. Fries <todd@fries.net>

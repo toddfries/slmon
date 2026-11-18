@@ -34,6 +34,10 @@ sub connect {
 		$dbh->do('PRAGMA journal_mode = WAL');
 		$dbh->do('PRAGMA synchronous = NORMAL');
 		$dbh->do('PRAGMA busy_timeout = 5000');
+		# The db child unveils only the state directory. A large GROUP BY
+		# spills to /tmp unless temp tables stay in memory, and that spill
+		# is reported as a disk I/O error.
+		$dbh->do('PRAGMA temp_store = MEMORY');
 		chmod 0600, $path if -e $path;
 	}
 	return $dbh;

@@ -435,7 +435,10 @@ sub run {
 		$IS_CHILD = 1;
 		$ACTIVE = 0;
 		close $pctl;
-		eval { SLMON::DB::child($dctl, $cfg) };
+		eval {
+			SLMON::DB::child($dctl, $cfg,
+			    $opt{init_only} || $opt{passwd_only});
+		};
 		SLMON::op("db: $@") if $@;
 		POSIX::_exit($@ ? 1 : 0);
 	}

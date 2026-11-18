@@ -689,7 +689,7 @@ sub _on_attach {
 }
 
 sub child {
-	my ($sock, $cfg) = @_;
+	my ($sock, $cfg, $auth_only) = @_;
 	SLMON::proc_title('db');
 	require SLMON::Imsg;
 	$SIG{TERM} = sub { exit 0 };
@@ -762,6 +762,9 @@ sub child {
 				warn "sld: db peer $name: $@" if $@;
 			}
 		}
+		# init and passwd share this process only to write settings.
+		# A rollup here races the running daemon and warns on the terminal.
+		next if $auth_only;
 		eval { _maybe_roll($dbh, $cfg, $roll) };
 		warn "sld: db rollup: $@" if $@;
 	}

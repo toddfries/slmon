@@ -295,6 +295,8 @@ Mode 0600, owner
 .Sy _sl .
 The directory is mode 0700.
 SQLite WAL and shared-memory files live beside it.
+Temporary tables stay in memory, because the database child unveils
+only this directory.
 .It Pa /var/sl/http.port
 The bound HTTP port, one line.
 .It Pa /etc/rc.d/sld

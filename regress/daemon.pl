@@ -251,6 +251,7 @@ S regress-secret
 END
 write_file("$work/passwd.script", <<'END');
 W Admin user
+P 2
 S operator
 W Password:
 S new-secret
@@ -304,6 +305,15 @@ die "second init text:\n[$out]\n" if $out !~ /slctl: already initialized\n/;
 my $hash2 = admin_hash($db);
 die "second init changed the password\n" if $hash2 ne $hash;
 
+{
+	my $cfg = SLMON::Config::parse("db = sqlite\n");
+	SLMON::Config::apply_paths($cfg, db_path => $db);
+	my $dbh = SLMON::DB::open_db($cfg);
+	$dbh->do(
+	    'INSERT INTO history_samples (run_id, dish_counter, ts) VALUES (1, 1, ?)',
+	    undef, time - 180);
+	$dbh->disconnect;
+}
 my $before = admin_settings($db);
 pipe(my $pw_r, my $pw_w) or die "pipe: $!";
 pipe(my $pwin_r, my $pwin_w) or die "pipe: $!";
@@ -338,6 +348,15 @@ die "old password still matches\n"
     if SLMON::Auth::verify_password('regress-secret', $after->{admin_pass_hash});
 die "new password does not match\n"
     if !SLMON::Auth::verify_password('new-secret', $after->{admin_pass_hash});
+{
+	my $cfg = SLMON::Config::parse("db = sqlite\n");
+	SLMON::Config::apply_paths($cfg, db_path => $db);
+	my $dbh = SLMON::DB::open_db($cfg, readonly => 1);
+	my ($rolled) = $dbh->selectrow_array(
+	    'SELECT last_rolled_minute FROM collector_state WHERE id = 1');
+	$dbh->disconnect;
+	die "passwd rolled the database ($rolled)\n" if $rolled;
+}
 my $old_cookie = SLMON::Auth::sign_session('admin', time + 100, $before->{session_secret});
 die "old cookie still verifies\n"
     if defined SLMON::Auth::verify_session($old_cookie, $after->{session_secret}, time);

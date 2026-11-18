@@ -1,6 +1,7 @@
-/* Drive a child on a pty. Script lines are "W text" (wait for substring)
- * and "S text" (write text plus a newline). A bare "S" writes a newline.
- * After the script, drain the pty until stdin says QUIT, then SIGTERM. */
+/* Drive a child on a pty. Script lines are "W text" (wait for substring),
+ * "S text" (write text plus a newline), and "P n" (sleep n seconds, at
+ * most 30). A bare "S" writes a newline. After the script, drain the pty
+ * until stdin says QUIT, then SIGTERM. */
 
 #include <errno.h>
 #include <poll.h>
@@ -83,6 +84,16 @@ main(int argc, char **argv)
 				send++;
 			if (dprintf(mfd, "%s\n", send) < 0)
 				die("pty write");
+		} else if (line[0] == 'P') {
+			char *secs = line + 1;
+			unsigned n;
+			if (*secs == ' ')
+				secs++;
+			n = (unsigned)atoi(secs);
+			if (n > 30)
+				n = 30;
+			if (n > 0)
+				sleep(n);
 		}
 	}
 	fclose(script);

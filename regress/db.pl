@@ -38,6 +38,10 @@ if ($which eq 'pg') {
 
 my $dbh = SLMON::DB::open_db($cfg);
 SLMON::DB::init_schema($dbh);
+if ($which eq 'sqlite') {
+	my ($store) = $dbh->selectrow_array('PRAGMA temp_store');
+	die "sqlite temp_store is $store\n" if !defined $store || $store != 2;
+}
 die "sqlite test loaded DBD::Pg\n" if $which eq 'sqlite' && $INC{'DBD/Pg.pm'};
 die "pg test did not use DBD::Pg\n" if $which eq 'pg' && !$INC{'DBD/Pg.pm'};
 die "driver mismatch\n" if $dbh->{private_slmon_driver} ne $which;
