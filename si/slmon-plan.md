@@ -1,10 +1,10 @@
 # Status
 
-Approved 2026-10-18. Steps 1 and 2 are in the tree, and the current page already refreshes on the dish interval. The page is Overview, Quality, Throughput, Dish, and History, for `24h`, `7d`, `30d`, `365d`, and `ever`. Do not start step 4 until that is the behavior you see. Man pages and the README describe the tool, not this list.
+Approved 2026-10-18. A step leaves this file in the same change that finishes it. Do not mark it done and leave it for a later session to discover. Man pages and the README describe the tool, not this list.
 
 # slmon — phases 2 through 5
 
-Phase 1 is shipped and collecting. Commit `87a4e17` added the first dashboard: latest sample, downlink, uplink, latency, loss, obstruction, the latest obstruction grid, and recent events, for `1h`, `6h`, `24h`, and `7d`. This plan does not rebuild that page from scratch and does not retell phase 1.
+Phase 1 is shipped and collecting. This plan does not rebuild the dashboard and does not retell phase 1.
 
 Man pages and the README describe the tool as it is when a change lands. They do not carry this phase list.
 
@@ -12,7 +12,7 @@ Still in force: no Docker, dish stays `192.168.100.1:9200`, the http child does 
 
 ## Decisions that bind every phase
 
-These apply to the whole plan. A later phase does not invent a second window set, a second refresh mechanism, a second way to deliver an event, a hardcoded retention period, a single listen socket, or a reason to copy another project.
+These apply to the whole plan. A later phase does not invent a second window set, a second refresh mechanism, a second way to deliver an event, a hardcoded retention period, or a reason to copy another project.
 
 **Original work.** Code, pages, and wording are written in this tree. Do not copy another project's source, markup, or text. Other projects are documentation, opened only to troubleshoot something this plan is already doing. They are not a list of features to add, and they are not named here.
 
@@ -24,7 +24,7 @@ Each window reads the finest tier that still covers it. `24h` prefers minutely r
 
 **Hooks.** A new output is a plugin. Modules live under `lib/SLMON/Notify/`. Config `notify` is a comma list, default empty. The first hook is `event`. Example send paths are `dbus`, `email`, and `discord`. A later hook or send path is a new module plus a name on that list. Phases 3, 4, and 5 raise events. They do not grow a private sender. The queue payload is the event (timestamp, type, duration, text). Plugins do not get a database handle. The contract is the manual, written in the same change as the first modules, so another person can add a mechanism without reading those modules as the spec.
 
-**Listen.** `listen` may appear more than once. Each value is an address and port this host should serve. The default file still has one line, `127.0.0.1:8080`. The parser accepts that together with an IPv6 loopback line and with further local addresses the operator writes. A line that fails to bind is logged with the address and the error. The lines that bound keep serving. The http child is the one that serves them.
+**Listen.** `listen` may appear more than once. Each value is an address and port this host should serve. The default file still has one line, `127.0.0.1:8080`. The parser accepts that together with an IPv6 loopback line and with further local addresses the operator writes. A line that fails to bind is logged with the address and the error. The lines that bound keep serving. The http child is the one that serves them. That behavior is queued below. Until it lands, the listener is one config value.
 
 **Retention knobs.** Every retention interval in this plan is a config key. The numbers below are the defaults. An operator changes the period in the config file. A code change is not required. Keys that already exist stay: `raw_retention_days` (90), `minutely_retention_days` (730), `hourly_rollup_days` (365).
 
@@ -34,66 +34,57 @@ Each window reads the finest tier that still covers it. `24h` prefers minutely r
 
 ## Already true, so later phases must not pretend otherwise
 
+- The page is Overview, Quality, Throughput, Dish, and History, for `24h`, `7d`, `30d`, `365d`, and `ever`. An unknown value, including `1h` and `6h`, is `24h`. Charts, the map, and the event list redraw in place on `dish_interval_s`, and the page reloads when `GET /health` reports a new `rev`. The obstruction grid draws a boresight ring when azimuth and elevation are known: north is up, azimuth 0 is north, elevation 90 is the center, elevation 0 is the horizon. History opens with an outage calendar. `ping_ok` is not an outage.
 - `history_samples` older than 90 days are averaged into `metrics_hourly` and deleted. `metrics` snapshots use that same cut. Hourly rows older than 365 days are averaged into `metrics_daily` and deleted. Minutely rows older than 730 days are deleted.
-- Hourly compression stores average drop, average latency, min and max latency, average and max obstruction, jitter, and average throughput. Obstruction comes from `metrics`. Jitter is the spread of the 1 Hz latencies (max minus min). A conflicting row keeps throughput already stored and fills a null obstruction or jitter. `history_samples` still has no obstruction column. The dashboard reads the rollup for obstruction when that tier has a fraction, and reads `metrics` when it does not. `24h` reads minutely rows. `7d` and `30d` read hourly rows. `365d` and `ever` read daily rows and keep an hourly row when that UTC day has no daily row. Jitter on every window is the jitter stored on those rows. Raw metrics are kept 90 days, so the obstruction fallback does not cover a full year.
+- Minute, hour, and day rows store obstruction (avg and max) from `metrics`, and jitter from the spread of the 1 Hz latencies (max minus min). Hourly compression stores average drop, average latency, min and max latency, average and max obstruction, jitter, and average throughput. A conflicting row keeps throughput already stored and fills a null obstruction or jitter. `history_samples` still has no obstruction column. The dashboard reads the rollup for obstruction when that tier has a fraction, and reads `metrics` when it does not. `24h` reads minutely rows. `7d` and `30d` read hourly rows. `365d` and `ever` read daily rows and keep an hourly row when that UTC day has no daily row. Jitter on every window is the jitter stored on those rows. Raw metrics are kept 90 days, so the obstruction fallback does not cover a full year.
 - `events`, `weather`, `speedtests`, and `alert_queue` have no delete path. `obstruction_map` is one row. `alert_queue` and `speedtests` have no writer yet.
-- The dish child is the only `libgrpc++` / `libprotobuf` process. A Perl gRPC client does not exist.
+- The dish child is the only `libgrpc++` / `libprotobuf` process. A Perl gRPC client does not exist on this branch.
 - The listener is one config value, `127.0.0.1:8080`. A repeated `listen` line is not accepted yet. Login is bcrypt, the session cookie is HMAC-SHA256 for 12 hours, and login failures are rate limited. There is no delete API.
 - The dashboard can be installed from `127.0.0.1` or `localhost`. The manifest, icons, and worker are responses from the http process. The worker does not cache. The Install button appears when the browser offers the prompt. A later phase does not add a second worker or a cache of the page.
 
 ## Phase 2 — see the record and act on it
 
-Build in this order. Each step is usable before the next one starts. Windows, refresh, hooks, listen lines, retention knobs, debug lines, and reply-shape notes are the rules above.
+Windows, refresh, hooks, listen lines, retention knobs, debug lines, and reply-shape notes are the rules above. Delete an item from this file in the change that lands it.
 
-1. **Honest rollup columns.** Done. Minute, hour, and day rows store real obstruction (avg and max) from `metrics`, and jitter from `history_samples` (the spread of the 1 Hz latencies in that bucket). The obstruction and jitter charts read that tier when it exists. The raw `metrics` scan remains where that tier does not exist yet.
+### Open
 
-2. **Sections, one page, one window.** Done. Overview is the latest sample. Quality is packet loss, latency, jitter, and obstruction. Throughput is downlink and uplink. Dish is identity, azimuth, elevation, SNR, alerts, and the grid. History is events. One control: `24h` (default), `7d`, `30d`, `365d`, `ever`. No tabs. `24h` reads minutely rows. `7d` and `30d` read hourly rows. `365d` and `ever` read daily rows and keep hourly rows for a UTC day that has no daily row. `ever` has no lower bound and the chart starts at the earliest drawn point. An unknown value, including `1h` and `6h`, is `24h`. Volume, peaks, and obstruction duration are not this step. They are under Still to draw.
-
-3. **Refresh on the panels that exist.** Done for the current page: the series, the map, and the event list redraw in place on `dish_interval_s`, and the page reloads when `GET /health` reports a new `rev`. Sky, calendar, health, SLA, and weather join that same interval and revision check in the step that adds them.
-
-4. **Sky and calendar.** Done. `SLMON::Dash::map_svg` draws a ring on the stored grid when azimuth and elevation are known. North is up, azimuth 0 is north, elevation 90 is the center, and elevation 0 is the horizon. `SLMON::Dash::calendar_svg` is one SVG of outages in the selected window. `ping_ok` is not an outage. Both sit on the existing page refresh.
-
-5. **Health score.** One number, 0–100, for the selected window, with the factor breakdown: drop 30, latency 25, obstruction 20, uptime 15, alerts 10. Show the factors, not only the total.
-
-6. **Weather, when configured.** If latitude and longitude are set, draw warning bands on the latency chart for the selected window, and a storm-versus-normal card from `weather.warning`. No coordinates are invented.
-
-7. **SLA math, same windows.** For whichever of the five windows is selected: uptime, longest outage, mean time between outages, and which hour of the day the outages fell in.
-
-8. **CSV.** An authenticated download of the finest tier that still exists for the selected window. No purge button in this phase. Aging policy is phase 4.
-
-9. **First hook: notify.** A `sld: notify` child drains `alert_queue` over imsg. It does not open the database. It starts only when `notify` is non-empty. The same change adds the contract to `man/man8/sld.8` and a short pointer in the README. The manual is the writeup another person implements from. It states, in this tree's own words:
-
-    - The file is `lib/SLMON/Notify/<Name>.pm`, package `SLMON::Notify::<Name>`.
-    - `check($cfg)` runs at startup, before pledge, and dies with a `sld:` line when a required `notify_<name>_*` key is missing or malformed.
-    - `promises()` returns the pledge nouns this module needs. An empty list adds none.
-    - `send($cfg, $event)` delivers one event. `$event` has `ts`, `type`, `duration_s`, and `text`. True means sent. False or an exception means that module failed. The module is not given a database handle.
-    - The notify child, not the module, counts attempts. `notify_max_attempts` defaults to 8. One module's failure does not consume the others. A module past the cap is given up for that row.
-    - `slctl notify test` enqueues one synthetic event.
-    - Keys are `notify_<name>_<field>`. The parser accepts that shape only for names listed in `notify`. Any other unknown key is still an error.
-
-    The manual's examples are the three modules below. They illustrate the contract. They are not the contract.
-
-    - `discord` POSTs the webhook in `notify_discord_url` over HTTPS, the same `IO::Socket::SSL` the weather child already uses.
-    - `email` submits through `/usr/sbin/sendmail -t`. `notify_email_to` and `notify_email_from` are required when it is enabled.
-    - `dbus` writes the event to the bus socket in `notify_dbus_path`. A missing bus is a failed attempt. The other plugins still send.
-
-    The notify child's pledge is the union of the enabled plugins. Payload text is the event. Debug logs the event type, the module name, the attempt number, and the failure text. It does not log the webhook URL's secret path or the message body beyond `text`.
-
-10. **Speed test, off by default.** A config key arms it. Nothing runs when the key is absent. Results go to `speedtests`. A finished run raises an event, which the notify hook delivers when a plugin is enabled.
-
-11. **`slctl top` and `GET /metrics`.** `slctl top` is a terminal view of the latest sample and the open events. `/metrics` is Prometheus text for the latest sample. It requires the session cookie. A config key may open it without a cookie on the listen lines; the default is closed. Neither one adds a window set.
-
-12. **More than one listen line.** The parent binds every `listen` value and the http child serves each socket that bound. IPv4 loopback and IPv6 loopback are both accepted in one file. Further local addresses are further lines. The man page shows the repeated key. Debug logs each bind with the address and the result.
-
-13. **Reply shape on the dish child we have.** The C++ client records new, missing, and retyped fields on `get_status`, `get_history`, and the obstruction map, as the reply-shape rule says. This does not wait for the Perl client.
-
-## Still to draw
-
-These sit on the sections from step 2. They are not a step of their own and they are not next. Steps 4 through 13 stay in the order above. Sky stays step 4.
-
-- **Volume, on Throughput.** Bytes down, bytes up, and the two added, for the selected window, from `down_bytes` and `up_bytes` already stored on minute, hour, and day rows.
-- **Peaks, on Throughput and Quality.** Peak download, peak upload, and the lowest latency in the selected window. Minute rows already store `max_downlink_bps`, `max_uplink_bps`, and `min_ping_latency_ms`. Hour and day rows do not store a peak rate. The same change adds those columns, so a long window does not invent a peak from an average.
+- **Volume, on Throughput.** Bytes down, bytes up, and the two added, for the selected window, from `down_bytes` and `up_bytes` already stored on minute, hour, and day rows. `365d` and `ever` include the hourly rows kept for a UTC day that has no daily row. A null byte is not a zero.
+- **CSV.** An authenticated download of the finest tier the selected window already reads, including that hourly tail. No purge button. Aging policy is phase 4.
 - **Obstruction behavior, on Dish.** Currently obstructed, average prolonged-obstruction duration, and average interval, from the latest status row (`currently_obstructed`, `obstruction_duration`, `obstruction_interval` on `metrics`). Numbers beside the fraction. Not a second series, and not rolled up.
+- **Weather, when configured.** If latitude and longitude are set, draw warning bands on the latency chart for the selected window, and a storm-versus-normal card from `weather.warning`. No coordinates are invented. `SLMON::Weather::warning` already returns `thunderstorm` for WMO 95, 96, or 99, `heavy snow` for 75 or 86, and `high wind` at 50 km/h or more. The card and the bands are the drawing.
+- **Reply shape on the dish child we have.** The C++ client records new, missing, and retyped fields on `get_status`, `get_history`, and the obstruction map, as the reply-shape rule says. This does not wait for the Perl client.
+- **Health score.** One number, 0–100, for the selected window, with the factor breakdown: drop 30, latency 25, obstruction 20, uptime 15, alerts 10. Show the factors, not only the total. Nothing in this tree maps a measurement onto those points. The score stays uncomputed until that mapping is written here. Do not invent the mapping in the change that draws the number.
+
+### Queued
+
+Do not start these until asked. Order:
+
+1. **Peaks, on Throughput and Quality.** Peak download, peak upload, and the lowest latency in the selected window. Minute rows already store `max_downlink_bps`, `max_uplink_bps`, and `min_ping_latency_ms`. Hour and day rows do not store a peak rate. The same change adds those columns, so a long window does not invent a peak from an average.
+2. **SLA math, same windows.** For whichever of the five windows is selected: uptime, longest outage, mean time between outages, and which hour of the day the outages fell in. `ping_ok` is not an outage.
+3. **`slctl top` and `GET /metrics`.** `slctl top` is a terminal view of the latest sample and the open events. `/metrics` is Prometheus text for the latest sample. It requires the session cookie. A config key may open it without a cookie on the listen lines; the default is closed. Neither one adds a window set.
+4. **More than one listen line.** The parent binds every `listen` value and the http child serves each socket that bound. IPv4 loopback and IPv6 loopback are both accepted in one file. Further local addresses are further lines. The man page shows the repeated key. Debug logs each bind with the address and the result. The default file stays one line, `127.0.0.1:8080`.
+
+### Later in this phase
+
+**First hook: notify.** A `sld: notify` child drains `alert_queue` over imsg. It does not open the database. It starts only when `notify` is non-empty. The same change adds the contract to `man/man8/sld.8` and a short pointer in the README. The manual is the writeup another person implements from. It states, in this tree's own words:
+
+- The file is `lib/SLMON/Notify/<Name>.pm`, package `SLMON::Notify::<Name>`.
+- `check($cfg)` runs at startup, before pledge, and dies with a `sld:` line when a required `notify_<name>_*` key is missing or malformed.
+- `promises()` returns the pledge nouns this module needs. An empty list adds none.
+- `send($cfg, $event)` delivers one event. `$event` has `ts`, `type`, `duration_s`, and `text`. True means sent. False or an exception means that module failed. The module is not given a database handle.
+- The notify child, not the module, counts attempts. `notify_max_attempts` defaults to 8. One module's failure does not consume the others. A module past the cap is given up for that row.
+- `slctl notify test` enqueues one synthetic event.
+- Keys are `notify_<name>_<field>`. The parser accepts that shape only for names listed in `notify`. Any other unknown key is still an error.
+
+The manual's examples are the three modules below. They illustrate the contract. They are not the contract.
+
+- `discord` POSTs the webhook in `notify_discord_url` over HTTPS, the same `IO::Socket::SSL` the weather child already uses.
+- `email` submits through `/usr/sbin/sendmail -t`. `notify_email_to` and `notify_email_from` are required when it is enabled.
+- `dbus` writes the event to the bus socket in `notify_dbus_path`. A missing bus is a failed attempt. The other plugins still send.
+
+The notify child's pledge is the union of the enabled plugins. Payload text is the event. Debug logs the event type, the module name, the attempt number, and the failure text. It does not log the webhook URL's secret path or the message body beyond `text`.
+
+**Speed test, off by default.** A config key arms it. Nothing runs when the key is absent. Results go to `speedtests`. A finished run raises an event, which the notify hook delivers when a plugin is enabled.
 
 ## Phase 3 — optimization
 
@@ -107,13 +98,13 @@ Measure and record, on this host, before rewriting:
 
 Known waste to remove once those numbers exist:
 
-- Any raw-`metrics` scan still used for obstruction or jitter. Phase 2 fills the rollup columns; this phase deletes the extra query.
+- Any raw-`metrics` scan still used for obstruction or jitter. The rollup columns are filled; this phase deletes the extra query.
 - A retain or a large rollup that leaves the WAL to grow until the next checkpoint. Checkpoint after the rollup and after retain.
 - Startup rollup work that re-reads more than the open window.
 
 **Major subsystem: Perl gRPC, last in this phase.** Replace `ext/dishbridge` with an in-tree Perl client that speaks plaintext gRPC to port 9200 and does not link `libgrpc++`, `libprotobuf`, abseil, re2, or c-ares. The dish child's imsg messages stay the same, so the db child does not change. Regress keeps the fake-dish runs and gains a fixture: a captured reply the C++ client already accepts, decoded by the Perl client to the same hash. The reply-shape record stays. A field the fixture newly contains is a logged name and type, not a silent drop. If a field does not match the dish, other projects may be read as documentation for that mismatch. Their source stays out of this tree. After that cut, the dish pledge drops `prot_exec` and the filesystem unveil that existed for the C++ library. The poll must still finish inside the 5 second deadline.
 
-Do not start the Perl client until the measurements above are written down. A smaller dependency tree is the point; a slower poll is not.
+An exploration of that client may proceed on a side branch and may keep `ext/dishbridge` in place. The cut that removes it on this branch waits until the measurements above are written down. A smaller dependency tree is the point; a slower poll is not.
 
 ## Phase 4 — leave it running
 
@@ -154,7 +145,7 @@ Read the aged record. Phase 4 keeps averages and maxima so this phase can compar
 
 For the selected window, compare drop, latency, throughput, and obstruction to the same hour of day in the hourly and daily history (`ever` and `365d` use day-of-year when the hour row is gone). Show median and a high percentile of that history, and how far the current bucket sits from them. When a metric stays outside that band for a configured duration, write an event. The phase 2 hook delivers it when `notify` lists a plugin. Debug logs the window, the bucket, the median, the high percentile, and the current value.
 
-No model training, no second dish, no write RPC to the dish, no account system, no second notification path. An OpenBSD port and the existing `rc.d` script are release work at the end of phase 4, not this phase.
+No model training, no second dish, no write RPC to the dish, no account system, no second notification path.
 
 ## Out of scope
 
