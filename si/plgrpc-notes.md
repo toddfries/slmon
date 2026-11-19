@@ -1,6 +1,6 @@
 # Perl gRPC sketch
 
-Exploration on `plgrpc` only. The dish child still loads `SLMON::Dish` and still links `libgrpc++`. `ext/dishbridge` stays. `DishProc` does not call this module. The pledge is unchanged. No phase-3 measurements were taken.
+Exploration on `plgrpc` only. The `sld` dish child calls `SLMON::DishWire` and does not load `SLMON::Dish`. `slctl once` still does. `ext/dishbridge` stays for that path and for the live comparison. The pledge is unchanged. No phase-3 measurements were taken.
 
 ## What the bridge sends
 
@@ -52,4 +52,6 @@ History: `current` is a number on both sides. The four packed arrays are each 90
 
 Map: both sides are 123 by 123, and `snr` has 15129 floats, which is 123×123. `unknown` 3, `retyped` 0.
 
-The later cut, after measurements, would point `DishProc` at this module and then drop `prot_exec` and the C++ unveil list. That cut is not this branch.
+`DishProc` now points at this module. The pledge still has `prot_exec` and the C++ unveil list. Dropping those waits for the phase 3 measurements.
+
+A three-minute run with `dish_interval_s` 60, one `sld` from `master` and one from this branch, wrote two SQLite files under `/tlaptop.a/tmp`. The `.schema` output was identical. Each file held one obstruction map, four status rows, and a little over a thousand distinct history counters.
