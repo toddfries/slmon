@@ -1,5 +1,5 @@
 REGRESS_TARGETS = run-unit run-imsg run-dish-pledge run-db-sqlite run-db-pg \
-	run-e2e-sqlite run-e2e-pg run-daemon run-live
+	run-e2e-sqlite run-e2e-pg run-daemon run-live run-plgrpc
 
 PERL = /usr/bin/perl
 ROOT = ${.CURDIR:H}
@@ -41,5 +41,8 @@ run-live:
 	else \
 		echo "SKIP live dish: 192.168.100.1:9200 does not answer" >&2; \
 	fi
+
+run-plgrpc:
+	cd ${ROOT} && ${PERL} regress/plgrpc.pl
 
 .include <bsd.regress.mk>
