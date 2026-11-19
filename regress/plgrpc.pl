@@ -5,6 +5,7 @@ use warnings;
 use FindBin;
 
 use lib "$FindBin::Bin/../lib";
+use IO::Socket::INET;
 use JSON::PP ();
 use SLMON ();
 use SLMON::DishWire;
@@ -354,6 +355,19 @@ ok(@{$off->{unknown}} == 0, 'utc_offset_s is known');
 ok(!exists $off->{doc}{status}{device_info}{utc_offset_s},
     'utc_offset_s is still not a key');
 
+my $neg = SLMON::DishWire::decode_reply(grpc_frame(pb(
+    'a27d0d0a0b28b0f3feffffffffffff01')));
+ok(@{$neg->{unknown}} == 0 && @{$neg->{retyped}} == 0,
+    'negative utc_offset_s is a known varint');
+ok(!exists $neg->{doc}{status}{device_info}{utc_offset_s},
+    'negative utc_offset_s is still not a key');
+my ($wide, $wide_i) = SLMON::DishWire::_varint_at(
+    pack('H*', 'ffffffffffffffffff01'), 0);
+ok("$wide" eq '18446744073709551615' && $wide_i == 10,
+    'negative one keeps the 64 unsigned bits');
+dies(sub { SLMON::DishWire::_varint_at(pack('H*', 'ffffffffffffffffff7f'), 0) },
+    qr/64-bit/, 'varint wider than 64 bits');
+
 my $re = SLMON::DishWire::decode_reply(grpc_frame(pb('a27d03884201')));
 ok(@{$re->{retyped}} == 1, 'one retyped field');
 ok($re->{retyped}[0]{name} eq 'signal_quality'
@@ -395,6 +409,276 @@ dies(sub { SLMON::DishWire::decode_reply(grpc_frame('')) },
     qr/no dish reply/, 'empty response');
 dies(sub { SLMON::DishWire::decode_reply(grpc_frame(pb('a27d00b27d00'))) },
     qr/more than one/, 'two replies in one response');
+
+sub hdrs {
+	my ($block) = @_;
+	return SLMON::DishWire::_hpack_decode(pack('H*', $block));
+}
+
+sub hdr_eq {
+	my ($got, $exp, $name) = @_;
+	my $good = @$got == @$exp;
+	for my $i (0 .. $#$exp) {
+		$good = 0 if $i > $#$got;
+		next if $i > $#$got;
+		$good = 0 if $got->[$i][0] ne $exp->[$i][0] || $got->[$i][1] ne $exp->[$i][1];
+	}
+	if (!$good) {
+		print STDERR "header $_: $got->[$_][0] = $got->[$_][1]\n" for 0 .. $#$got;
+	}
+	ok($good, $name);
+	return;
+}
+
+my $dyn = SLMON::DishWire::_hpack_new();
+hdr_eq(SLMON::DishWire::_hpack_decode(pack('H*',
+	'828684418cf1e3c2e5f23a6ba0ab90f4ff'), $dyn), [
+	[':method', 'GET'],
+	[':scheme', 'http'],
+	[':path', '/'],
+	[':authority', 'www.example.com'],
+], 'hpack request with huffman');
+hdr_eq(SLMON::DishWire::_hpack_decode(pack('H*',
+	'828684be5886a8eb10649cbf'), $dyn), [
+	[':method', 'GET'],
+	[':scheme', 'http'],
+	[':path', '/'],
+	[':authority', 'www.example.com'],
+	['cache-control', 'no-cache'],
+], 'hpack dynamic index');
+SLMON::DishWire::_hpack_decode(pack('C*', 0x20, 0x82), $dyn);
+dies(sub { SLMON::DishWire::_hpack_decode(pack('C', 0xbe), $dyn) },
+    qr/hpack index/, 'table size zero drops the dynamic index');
+
+hdr_eq(hdrs('488264025885aec3771a4b6196d07abe941054d444a8200595040b8166e082a62d1bff6e919d29ad171863c78f0b97c8e9ae82ae43d3'), [
+	[':status', '302'],
+	['cache-control', 'private'],
+	['date', 'Mon, 21 Oct 2013 20:13:21 GMT'],
+	['location', 'https://www.example.com'],
+], 'hpack response with huffman');
+ok(SLMON::DishWire::_huff_decode(pack('H*', '9bd9ab')) eq 'gzip', 'huffman gzip');
+ok(SLMON::DishWire::_huff_decode(pack('H*',
+	'94e7821dd7f2e6c7b335dfdfcd5b3960d5af27087f3672c1ab270fb5291f9587316065c003ed4ee5b1063d5007'))
+    eq 'foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1',
+    'huffman cookie');
+
+dies(sub { SLMON::DishWire::call('127.0.0.1:9', 'reboot') },
+    qr/unknown dish op/, 'call rejects an unknown op');
+dies(sub { SLMON::DishWire::call('not a host', 'status') },
+    qr/authority/, 'call authority');
+dies(sub { SLMON::DishWire::call('192.168.100.1', 'status') },
+    qr/host:port/, 'call target needs a port');
+
+sub enc_varint {
+	my ($n) = @_;
+	my $out = '';
+	while ($n >= 128) {
+		$out .= pack('C', ($n & 0x7f) | 0x80);
+		$n >>= 7;
+	}
+	$out .= pack('C', $n);
+	return $out;
+}
+
+sub pb_varint {
+	my ($num, $val) = @_;
+	return enc_varint(($num << 3) | 0) . enc_varint($val);
+}
+
+sub pb_bytes {
+	my ($num, $blob) = @_;
+	return enc_varint(($num << 3) | 2) . enc_varint(length $blob) . $blob;
+}
+
+sub srv_fill {
+	my ($sock, $buf, $need) = @_;
+	while (length($$buf) < $need) {
+		my $got = sysread($sock, my $chunk, 65536);
+		die "server eof\n" if !defined $got || $got == 0;
+		$$buf .= $chunk;
+	}
+	return;
+}
+
+sub srv_frame {
+	my ($sock, $buf) = @_;
+	srv_fill($sock, $buf, 9);
+	my $head = substr($$buf, 0, 9, '');
+	my $flen = unpack('N', "\0" . substr($head, 0, 3));
+	my $type = ord(substr($head, 3, 1));
+	my $flags = ord(substr($head, 4, 1));
+	my $sid = unpack('N', substr($head, 5, 4)) & 0x7fffffff;
+	die "server frame $flen\n" if $flen > 1048576;
+	srv_fill($sock, $buf, $flen) if $flen;
+	my $payload = $flen ? substr($$buf, 0, $flen, '') : '';
+	return ($type, $flags, $sid, $payload);
+}
+
+sub srv_write {
+	my ($sock, $bytes) = @_;
+	my $off = 0;
+	while ($off < length $bytes) {
+		my $w = syswrite($sock, $bytes, length($bytes) - $off, $off);
+		die "server write: $!\n" if !defined $w || $w == 0;
+		$off += $w;
+	}
+	return;
+}
+
+sub srv_take_request {
+	my ($cli, $need, $op) = @_;
+	my $buf = '';
+	my $magic = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+	srv_fill($cli, \$buf, length $magic);
+	die "server preface\n" if substr($buf, 0, length($magic), '') ne $magic;
+	my $conn = 65535;
+	my $init = 65535;
+	my $stream;
+	my $got = 0;
+	my $acked = 0;
+	my $req = '';
+	my $sent = 0;
+	while (!$got || !$acked) {
+		my ($type, $flags, $sid, $payload) = srv_frame($cli, \$buf);
+		if ($type == 4 && !($flags & 1)) {
+			die "server settings\n" if length($payload) % 6;
+			for (my $i = 0; $i < length $payload; $i += 6) {
+				my ($id, $val) = unpack('n N', substr($payload, $i, 6));
+				if ($id == 4) {
+					my $delta = $val - $init;
+					$init = $val;
+					$stream += $delta if defined $stream;
+				}
+			}
+			if (!$sent) {
+				srv_write($cli, http2_frame(4, 0, 0, ''));
+				$sent = 1;
+			}
+		} elsif ($type == 4 && ($flags & 1)) {
+			$acked = 1;
+		} elsif ($type == 8) {
+			die "server window\n" if length($payload) != 4;
+			my $inc = unpack('N', $payload) & 0x7fffffff;
+			die "server window zero\n" if $inc == 0;
+			if ($sid == 0) {
+				$conn += $inc;
+			} elsif (defined $stream) {
+				$stream += $inc;
+			}
+		} elsif ($type == 1) {
+			$stream = $init if !defined $stream;
+		} elsif ($type == 0) {
+			$req .= $payload;
+			$got = 1 if $flags & 1;
+		}
+	}
+	die "server connection window $conn need $need\n" if $conn < $need;
+	die "server stream window\n" if !defined $stream || $stream < $need;
+	my $body = SLMON::DishWire::request_bytes($op);
+	my $expect = pack('C N', 0, length $body) . $body;
+	die "server request\n" if $req ne $expect;
+	return;
+}
+
+sub srv_reply {
+	my ($cli, $hdr, $data, $trailers) = @_;
+	if (defined $trailers) {
+		srv_write($cli, http2_frame(1, 0x4, 1, $hdr));
+		my $off = 0;
+		while ($off < length $data) {
+			my $n = length($data) - $off;
+			$n = 16384 if $n > 16384;
+			srv_write($cli, http2_frame(0, 0, 1, substr($data, $off, $n)));
+			$off += $n;
+		}
+		srv_write($cli, http2_frame(1, 0x5, 1, $trailers));
+	} else {
+		srv_write($cli, http2_frame(1, 0x5, 1, $hdr));
+	}
+	while (1) {
+		my $got = sysread($cli, my $chunk, 65536);
+		last if !defined $got || $got == 0;
+	}
+	close $cli;
+	return;
+}
+
+sub with_server {
+	my ($child, $op) = @_;
+	my $srv = IO::Socket::INET->new(
+		LocalAddr => '127.0.0.1',
+		LocalPort => 0,
+		Proto     => 'tcp',
+		Listen    => 1,
+		Reuse     => 1,
+	) or die "listen: $!\n";
+	my $port = $srv->sockport;
+	my $pid = fork();
+	die "fork: $!\n" if !defined $pid;
+	if ($pid == 0) {
+		$SIG{ALRM} = sub { die "loopback server hung\n" };
+		$SIG{PIPE} = 'IGNORE';
+		alarm(8);
+		eval { $child->($srv); };
+		my $err = $@;
+		alarm(0);
+		if ($err) {
+			$err =~ s/[^\x20-\x7e]/./g;
+			print STDERR "loopback server: $err\n";
+			exit 1;
+		}
+		exit 0;
+	}
+	close $srv;
+	my $got = eval { SLMON::DishWire::call("127.0.0.1:$port", $op) };
+	my $err = $@;
+	waitpid($pid, 0);
+	return ($got, $err, $?);
+}
+
+my $rows = 100;
+my $cols = 200;
+my $floats = pack('f<*', (1) x ($rows * $cols));
+my $inner = pb_varint(1, $rows) . pb_varint(2, $cols) . pb_bytes(3, $floats);
+my $map_msg = pb_bytes(2008, $inner);
+my $map_grpc = pack('C N', 0, length $map_msg) . $map_msg;
+ok(length($map_grpc) > 65535, 'fixture map is larger than the default window');
+
+my ($mapgot, $maperr, $maprc) = with_server(sub {
+	my ($srv) = @_;
+	my $cli = $srv->accept or die "accept: $!\n";
+	binmode $cli;
+	srv_take_request($cli, length $map_grpc, 'map');
+	srv_reply($cli, pack('C', 0x88)
+	    . SLMON::DishWire::_hpack_lit_name(31, 'application/grpc'),
+	    $map_grpc, SLMON::DishWire::_hpack_lit_new('grpc-status', '0'));
+}, 'map');
+if ($maperr) {
+	$maperr =~ s/[^\x20-\x7e]/./g;
+	print STDERR "loopback client: $maperr\n";
+}
+ok(!$maperr && $maprc == 0 && $mapgot && $mapgot->{op} eq 'map'
+    && $mapgot->{doc}{num_rows} == $rows
+    && $mapgot->{doc}{num_cols} == $cols
+    && @{$mapgot->{doc}{snr}} == $rows * $cols
+    && $mapgot->{doc}{snr}[0] == 1
+    && $mapgot->{doc}{snr}[-1] == 1
+    && @{$mapgot->{unknown}} == 0 && @{$mapgot->{retyped}} == 0,
+    'loopback map larger than the default window');
+
+my ($bad, $baderr, $badrc) = with_server(sub {
+	my ($srv) = @_;
+	my $cli = $srv->accept or die "accept: $!\n";
+	binmode $cli;
+	srv_take_request($cli, 1, 'status');
+	srv_reply($cli, pack('C', 0x88)
+	    . SLMON::DishWire::_hpack_lit_name(31, 'application/grpc')
+	    . SLMON::DishWire::_hpack_lit_new('grpc-status', '1')
+	    . SLMON::DishWire::_hpack_lit_new('grpc-message', 'no'),
+	    '', undef);
+}, 'status');
+ok(!$bad && $badrc == 0 && $baderr =~ /grpc status 1/,
+    'grpc status is not a dish hash');
 
 print "$n tests, $fail failed\n";
 exit($fail ? 1 : 0);

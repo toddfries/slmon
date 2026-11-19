@@ -5,7 +5,7 @@ PERL = /usr/bin/perl
 ROOT = ${.CURDIR:H}
 CLEANFILES += ptyfeed
 
-.PHONY: ${REGRESS_TARGETS}
+.PHONY: ${REGRESS_TARGETS} run-plgrpc-live
 
 ptyfeed: ptyfeed.c
 	cc -g -O2 -Wall -o ptyfeed ptyfeed.c -lutil
@@ -44,5 +44,9 @@ run-live:
 
 run-plgrpc:
 	cd ${ROOT} && ${PERL} regress/plgrpc.pl
+
+# One status, one history, one map against the dish. Not a REGRESS_TARGET.
+run-plgrpc-live:
+	cd ${ROOT} && PERL5LIB=lib:blib ${PERL} regress/plgrpc-live.pl
 
 .include <bsd.regress.mk>

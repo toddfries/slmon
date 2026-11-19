@@ -1,6 +1,6 @@
 # Perl gRPC sketch
 
-Exploration on `plgrpc` only. The dish child still loads `SLMON::Dish` and still links `libgrpc++`. `ext/dishbridge` stays. The live dish was not contacted. No phase-3 measurements were taken, and the pledge is unchanged.
+Exploration on `plgrpc` only. The dish child still loads `SLMON::Dish` and still links `libgrpc++`. `ext/dishbridge` stays. `DishProc` does not call this module. The pledge is unchanged. No phase-3 measurements were taken.
 
 ## What the bridge sends
 
@@ -30,8 +30,26 @@ A field this code does not name is not stored. A stored field on the wrong wire 
 
 ## Approach
 
-`lib/SLMON/DishWire.pm` is the in-tree client. No new Perl package. `request_bytes` builds the three requests. `wire_request` builds the client preface, empty SETTINGS, uncompressed HPACK headers (`:method` POST, `:scheme` http, `:path` `/SpaceX.API.Device.Device/Handle`, `:authority`, `content-type: application/grpc`, `te: trailers`), and one DATA frame. `unwrap_http2` concatenates DATA payloads, including a message split across frames, and skips other frames. `decode_reply` takes one uncompressed grpc message and returns `op`, `doc`, `unknown`, and `retyped`.
+`lib/SLMON/DishWire.pm` is the in-tree client. No new Perl package. `request_bytes` builds the three empty bodies and nothing else. `wire_request` is the frozen bytes the fixture checks: the client preface, an empty SETTINGS frame, uncompressed HPACK headers (`:method` POST, `:scheme` http, `:path` `/SpaceX.API.Device.Device/Handle`, `:authority`, `content-type: application/grpc`, `te: trailers`), and one DATA frame. `call($target, $op)` is the socket. It does not use that empty SETTINGS frame. It sends SETTINGS with push disabled, a 1 MiB stream window, and a 64 KiB max frame, then a connection WINDOW_UPDATE of 1 MiB, the same headers plus `grpc-timeout: 5S`, and one DATA frame. The deadline is 5 seconds, including the connect.
 
-Not in this sketch: a socket, the SETTINGS ack, flow-control updates, Huffman-coded HPACK, and grpc-status trailers. A varint that does not fit a signed 64-bit integer is rejected. The later cut, after measurements, would point `DishProc` at this module and then drop `prot_exec` and the C++ unveil list. That cut is not this branch.
+The read loop acks a peer SETTINGS, answers a PING, and ignores a WINDOW_UPDATE. A DATA frame is unpadded and appended. Each DATA frame also returns that many bytes to the connection window and to stream 1, because the default 65535 connection window is smaller than the map. HEADERS and CONTINUATION are decoded as HPACK, including Huffman and the dynamic table. `:status` must be 200. A present content-type must be `application/grpc`. The trailers (the HEADERS block that ends the stream) must carry `grpc-status: 0`. `decode_reply` then returns `op`, `doc`, `unknown`, and `retyped` for that one uncompressed grpc message.
 
-`regress/plgrpc.pl` decodes fixtures built from the field numbers above, including one timestamp that is not exact in IEEE binary64, and checks the hash `StatusMap` and `History` already consume.
+A negative int32 is a 10-byte varint, sign-extended, so bit 63 is set. The decoder keeps those 64 bits. An 11th byte, or a tenth byte other than 0 or 1, is rejected. `utc_offset_s` is one of those varints and is still not a key.
+
+One `get_history` does not pop or clear the dish ring. The collector dedupes by sample counter, so the read does not steal samples from `sld`. One `dish_get_obstruction_map` does not reset the grid. There is no clear, reboot, or stow request in the generated `Request`, and this client does not send one.
+
+`regress/plgrpc.pl` does not open the dish. It decodes fixtures, including one timestamp that is not exact in IEEE binary64, a negative `utc_offset_s`, and the RFC 7541 Huffman examples. A loopback peer sends a map larger than 65535 bytes and checks that the client raised both windows and acked SETTINGS before the body. `make regress` does not run the live check. `make -C regress run-plgrpc-live` does, once per op.
+
+## Live comparison
+
+Target `192.168.100.1:9200` from `etc/sl.conf`. Shape only. No device id, no serial, no sample dump.
+
+An earlier status reply was rejected before history or map were sent: the decoder then refused a 10-byte varint. That is the negative-int32 case above. On the run after that fix, the Perl `call` and `SLMON::Dish::call` each ran once for status, history, and map.
+
+Status: the same keys the fixture stores. `legacy_state` is null on both sides. Leaves on the Perl hash: 17 numbers, 25 bools, 4 strings, 2 nulls (the legacy state and one other leaf). The other side matches those types. `unknown` 28, `retyped` 0.
+
+History: `current` is a number on both sides. The four packed arrays are each 900 long on both sides. `unknown` 3, `retyped` 0.
+
+Map: both sides are 123 by 123, and `snr` has 15129 floats, which is 123×123. `unknown` 3, `retyped` 0.
+
+The later cut, after measurements, would point `DishProc` at this module and then drop `prot_exec` and the C++ unveil list. That cut is not this branch.
