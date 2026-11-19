@@ -242,6 +242,13 @@ is
 .Li 365d ,
 or
 .Li ever .
+Throughput states bytes down, bytes up, and their sum for that window,
+from the byte columns on the rows the window reads.
+A null byte is left out of the sum.
+.Li 365d
+and
+.Li ever
+include an hourly row whose UTC day has no daily row.
 .It Cm GET /login , POST /login , POST /logout
 The browser login.
 Success sets the cookie and redirects to

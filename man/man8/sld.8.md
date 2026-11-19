@@ -268,6 +268,13 @@ The default is
 > `365d`,
 > or
 > `ever`.
+> Throughput states bytes down, bytes up, and their sum for that window,
+> from the byte columns on the rows the window reads.
+> A null byte is left out of the sum.
+> `365d`
+> and
+> `ever`
+> include an hourly row whose UTC day has no daily row.
 
 **GET /login**, **POST /login**, **POST /logout**
 

@@ -116,6 +116,35 @@ sub points {
 	return \@out;
 }
 
+# Sum stored byte columns for the rows the window already loaded.
+# A null is absent, not a zero. The total adds only the sides that exist.
+sub volume_bytes {
+	my ($rows) = @_;
+	my ($down, $up);
+	my ($have_down, $have_up);
+	for my $row (@{ $rows || [] }) {
+		my $d = _num($row->{down_bytes});
+		my $u = _num($row->{up_bytes});
+		if (defined $d) {
+			$down += $d;
+			$have_down = 1;
+		}
+		if (defined $u) {
+			$up += $u;
+			$have_up = 1;
+		}
+	}
+	my $total;
+	if ($have_down || $have_up) {
+		$total = ($down // 0) + ($up // 0);
+	}
+	return {
+		down  => $have_down ? $down : undef,
+		up    => $have_up ? $up : undef,
+		total => $total,
+	};
+}
+
 sub _earliest {
 	my (@lists) = @_;
 	my $t;
@@ -136,6 +165,18 @@ sub fmt_rate {
 	return sprintf('%.1f Mbit/s', $bps / 1_000_000) if $abs >= 1_000_000;
 	return sprintf('%.0f kbit/s', $bps / 1000) if $abs >= 1000;
 	return sprintf('%.0f bit/s', $bps);
+}
+
+sub fmt_bytes {
+	my ($n) = @_;
+	return 'n/a' if !defined _num($n);
+	$n = _num($n);
+	my $sign = $n < 0 ? '-' : '';
+	my $abs = abs($n);
+	return $sign . sprintf('%.1f GB', $abs / 1_000_000_000) if $abs >= 1_000_000_000;
+	return $sign . sprintf('%.1f MB', $abs / 1_000_000) if $abs >= 1_000_000;
+	return $sign . sprintf('%.0f kB', $abs / 1000) if $abs >= 1000;
+	return $sign . sprintf('%.0f B', $abs);
 }
 
 sub fmt_uptime {
@@ -770,7 +811,13 @@ sub page {
 		_series_chart('Jitter', 'ms', 'jitter', $jpts, $axis_from, $to, 1, $sec),
 		_series_chart('Obstruction', '%', 'obstr', $obpts, $axis_from, $to, 100, $sec),
 	);
-	my $throughput = join '', map { _figure($_) } (
+	my $vol = volume_bytes($d->{series});
+	my $volume = '<section class="stats">'
+	    . _stat('Bytes down', fmt_bytes($vol->{down}))
+	    . _stat('Bytes up', fmt_bytes($vol->{up}))
+	    . _stat('Bytes total', fmt_bytes($vol->{total}))
+	    . '</section>';
+	my $throughput = $volume . join '', map { _figure($_) } (
 		_series_chart('Downlink', $dunit, 'down', $pts, $axis_from, $to, 1 / $dscale, $sec),
 		_series_chart('Uplink', $uunit, 'up', $pts, $axis_from, $to, 1 / $uscale, $sec),
 	);

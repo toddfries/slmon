@@ -108,7 +108,9 @@ target runs `slctl once` only when `192.168.100.1:9200` answers.
 
 `/` is one page. Overview is the latest downlink, uplink, latency, loss,
 obstruction, and uptime. Quality charts packet loss, latency, jitter, and
-obstruction. Throughput charts downlink and uplink. Dish shows identity,
+obstruction. Throughput charts downlink and uplink, and states the bytes
+down, the bytes up, and their sum for the selected window. A stored null
+is left out of that sum. Dish shows identity,
 azimuth, elevation, SNR, alerts, and the obstruction grid. The grid
 marks the boresight: north is up, azimuth 0 is north, elevation 90 is
 the center, and elevation 0 is the horizon. History opens with an

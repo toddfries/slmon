@@ -445,11 +445,13 @@ my $home = SLMON::Http::respond(http_req('GET', '/',
 				ts => 1_000, downlink_bps => 1_000_000,
 				uplink_bps => 100_000, ping_latency_ms => 20,
 				ping_drop_rate => 0.01, obstr_fraction => 0.002,
+				down_bytes => 2_000_000_000, up_bytes => undef,
 			}, {
 				ts => 2_000, downlink_bps => 8_000_000,
 				uplink_bps => 400_000, ping_latency_ms => 40,
 				ping_drop_rate => 0, obstr_fraction => 0.004,
 				jitter_ms => 12,
+				down_bytes => undef, up_bytes => 2_000_000_000,
 			}],
 			latest => {
 				ts => 2_000, downlink_bps => 8_000_000,
@@ -479,7 +481,7 @@ ok($home =~ /Signed in as admin/ && $home =~ m{action="/logout"}
     && $home !~ /range=1h/ && $home !~ /range=6h/
     && $home =~ /id="overview".*id="quality".*id="throughput".*id="dish".*id="history"/s
     && $home =~ /id="quality".*<h2>Packet loss.*<h2>Latency.*<h2>Jitter.*<h2>Obstruction.*id="throughput"/s
-    && $home =~ /id="throughput".*<h2>Downlink.*<h2>Uplink.*id="dish"/s
+    && $home =~ /id="throughput".*Bytes down.*2\.0 GB.*Bytes up.*2\.0 GB.*Bytes total.*4\.0 GB.*<h2>Downlink.*<h2>Uplink.*id="dish"/s
     && $home =~ /id="dish".*a&lt;b.*motors_stuck.*id="history"/s
     && $home !~ /id="overview".*motors_stuck.*id="quality"/s
     && $home !~ /a<b/ && $home =~ /No obstruction map stored/
@@ -670,6 +672,31 @@ ok(@$merged == 3
     && $merged->[1]{ts_hour} == 3600
     && $merged->[2]{ts_hour} == 2 * 86400,
     'hourly rows fill days that have no daily row');
+my $vol = SLMON::Dash::volume_bytes([
+    { down_bytes => 1000, up_bytes => undef },
+    { down_bytes => undef, up_bytes => 0 },
+    { down_bytes => 500, up_bytes => 25 },
+]);
+ok($vol->{down} == 1500 && $vol->{up} == 25 && $vol->{total} == 1525,
+    'volume skips a null byte and keeps a stored zero');
+my $none = SLMON::Dash::volume_bytes([{ down_bytes => undef, up_bytes => undef }]);
+ok(!defined $none->{down} && !defined $none->{up} && !defined $none->{total},
+    'a window of null bytes is not a zero');
+my $tailed = SLMON::Dash::merge_unrolled(
+    [{ ts_day => 86400, down_bytes => 100, up_bytes => 10 }],
+    [
+	{ ts_hour => 86400 + 3600, down_bytes => 999, up_bytes => 9 },
+	{ ts_hour => 2 * 86400, down_bytes => 7, up_bytes => undef },
+    ],
+);
+my $long = SLMON::Dash::volume_bytes($tailed);
+ok(@$tailed == 2 && $long->{down} == 107 && $long->{up} == 10 && $long->{total} == 117,
+    'a long window adds the unrolled hourly tail');
+ok(SLMON::Dash::fmt_bytes(undef) eq 'n/a'
+    && SLMON::Dash::fmt_bytes(0) eq '0 B'
+    && SLMON::Dash::fmt_bytes(2_000_000_000) eq '2.0 GB'
+    && SLMON::Dash::fmt_bytes(250_000_000) eq '250.0 MB',
+    'byte totals use decimal units');
 my $ever_html = SLMON::Dash::page({
     user => 'admin',
     range => 'ever',

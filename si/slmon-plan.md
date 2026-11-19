@@ -48,7 +48,6 @@ Windows, refresh, hooks, listen lines, retention knobs, debug lines, and reply-s
 
 ### Open
 
-- **Volume, on Throughput.** Bytes down, bytes up, and the two added, for the selected window, from `down_bytes` and `up_bytes` already stored on minute, hour, and day rows. `365d` and `ever` include the hourly rows kept for a UTC day that has no daily row. A null byte is not a zero.
 - **CSV.** An authenticated download of the finest tier the selected window already reads, including that hourly tail. No purge button. Aging policy is phase 4.
 - **Obstruction behavior, on Dish.** Currently obstructed, average prolonged-obstruction duration, and average interval, from the latest status row (`currently_obstructed`, `obstruction_duration`, `obstruction_interval` on `metrics`). Numbers beside the fraction. Not a second series, and not rolled up.
 - **Weather, when configured.** If latitude and longitude are set, draw warning bands on the latency chart for the selected window, and a storm-versus-normal card from `weather.warning`. No coordinates are invented. `SLMON::Weather::warning` already returns `thunderstorm` for WMO 95, 96, or 99, `heavy snow` for 75 or 86, and `high wind` at 50 km/h or more. The card and the bands are the drawing.
