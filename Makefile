@@ -1,15 +1,30 @@
 # Build the imsg and dish extensions, then the regress suite.
 
-.PHONY: all regress clean install
+.PHONY: all man regress clean install
 
 PREFIX ?= /usr/local
 DESTDIR ?=
 ARCH != perl -MConfig -e 'print $$Config{archname}'
 SITE = ${DESTDIR}${PREFIX}/libdata/perl5/site_perl
 
-all:
+MAN8 = sld.8 slctl.8
+MAN5 = sl.conf.5
+
+all: man
 	cd ext/imsg && ${MAKE}
 	cd ext/dishbridge && ${MAKE}
+
+man: ${MAN8:S/$/.md/:S/^/man\/man8\//} ${MAN5:S/$/.md/:S/^/man\/man5\//}
+
+.for p in ${MAN8}
+man/man8/${p}.md: man/man8/${p}
+	cd man/man8 && mandoc -T markdown ${p} > ${p}.md
+.endfor
+
+.for p in ${MAN5}
+man/man5/${p}.md: man/man5/${p}
+	cd man/man5 && mandoc -T markdown ${p} > ${p}.md
+.endfor
 
 regress: all
 	cd regress && ${MAKE} regress

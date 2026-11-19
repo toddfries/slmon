@@ -11,7 +11,7 @@ when the dish is somewhere else.
 If that port does not answer, `slctl once` says so and returns. `sld` keeps
 running and logs the same fact once, until the dish answers.
 
-The manuals are `man/man8/sld.8`, `man/man8/slctl.8`, and `man/man5/sl.conf.5`.
+The manuals are [sld(8)](man/man8/sld.8.md) (`man/man8/sld.8`), [slctl(8)](man/man8/slctl.8.md) (`man/man8/slctl.8`), and [sl.conf(5)](man/man5/sl.conf.5.md) (`man/man5/sl.conf.5`).
 
 ## Run
 

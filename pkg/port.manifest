@@ -11,7 +11,10 @@ file	644	ext/dishbridge/dishbridge.cc	ext/dishbridge/dishbridge.cc
 file	644	ext/dishbridge/dishbridge.h	ext/dishbridge/dishbridge.h
 file	644	proto/spacex_device.proto	proto/spacex_device.proto
 file	644	man/man8/sld.8	man/man8/sld.8
+file	644	man/man8/sld.8.md	man/man8/sld.8.md
 file	644	man/man8/slctl.8	man/man8/slctl.8
+file	644	man/man8/slctl.8.md	man/man8/slctl.8.md
 file	644	man/man5/sl.conf.5	man/man5/sl.conf.5
+file	644	man/man5/sl.conf.5.md	man/man5/sl.conf.5.md
 file	644	etc/sl.conf	etc/sl.conf
 rc	755	rc.d/sld	sld
