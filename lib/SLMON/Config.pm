@@ -10,6 +10,7 @@ my %DEFAULT = (
 	db_path                 => '/var/sl/sl.db',
 	dish_host               => '192.168.100.1',
 	dish_interval_s         => 30,
+	dish_client             => 'perl',
 	db                      => 'sqlite',
 	pg_host                 => '',
 	pg_port                 => '',
@@ -64,6 +65,8 @@ sub parse {
 	die SLMON::err('rollup_interval_s must be at least 1') if $cfg{rollup_interval_s} < 1;
 	die SLMON::err('log_level must be info or debug')
 	    if $cfg{log_level} ne 'info' && $cfg{log_level} ne 'debug';
+	die SLMON::err('dish_client must be perl or xs')
+	    if $cfg{dish_client} ne 'perl' && $cfg{dish_client} ne 'xs';
 	if ($cfg{latitude} ne '' || $cfg{longitude} ne '') {
 		die SLMON::err('latitude and longitude must both be set')
 		    if $cfg{latitude} eq '' || $cfg{longitude} eq '';

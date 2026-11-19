@@ -1,9 +1,11 @@
-# Build the imsg and dish extensions, then the regress suite.
+# Build the imsg extension. The dish XS module links libgrpc++ and is
+# left unbuilt unless WITH_DISH_XS=yes. The default client is Perl.
 
 .PHONY: all man regress clean install
 
 PREFIX ?= /usr/local
 DESTDIR ?=
+WITH_DISH_XS ?= no
 ARCH != perl -MConfig -e 'print $$Config{archname}'
 SITE = ${DESTDIR}${PREFIX}/libdata/perl5/site_perl
 
@@ -12,7 +14,7 @@ MAN5 = sl.conf.5
 
 all: man
 	cd ext/imsg && ${MAKE}
-	cd ext/dishbridge && ${MAKE}
+	if [ "${WITH_DISH_XS}" = yes ]; then cd ext/dishbridge && ${MAKE}; fi
 
 man: ${MAN8:S/$/.md/:S/^/man\/man8\//} ${MAN5:S/$/.md/:S/^/man\/man5\//}
 
@@ -37,7 +39,6 @@ clean:
 install: all
 	install -d ${DESTDIR}${PREFIX}/sbin
 	install -d ${SITE}/SLMON/DB
-	install -d ${SITE}/${ARCH}/auto/SLMON/Dish
 	install -d ${SITE}/${ARCH}/auto/SLMON/Imsg
 	install -d ${DESTDIR}${PREFIX}/man/man5
 	install -d ${DESTDIR}${PREFIX}/man/man8
@@ -46,8 +47,12 @@ install: all
 	install -m 0444 lib/SLMON.pm ${SITE}/SLMON.pm
 	install -m 0444 lib/SLMON/*.pm ${SITE}/SLMON
 	install -m 0444 lib/SLMON/DB/*.pm ${SITE}/SLMON/DB
-	install -m 0555 blib/auto/SLMON/Dish/Dish.so ${SITE}/${ARCH}/auto/SLMON/Dish/Dish.so
 	install -m 0555 blib/auto/SLMON/Imsg/Imsg.so ${SITE}/${ARCH}/auto/SLMON/Imsg/Imsg.so
+	if [ "${WITH_DISH_XS}" = yes ]; then \
+		install -d ${SITE}/${ARCH}/auto/SLMON/Dish; \
+		install -m 0555 blib/auto/SLMON/Dish/Dish.so \
+		    ${SITE}/${ARCH}/auto/SLMON/Dish/Dish.so; \
+	fi
 	install -m 0444 man/man8/sld.8 man/man8/slctl.8 ${DESTDIR}${PREFIX}/man/man8
 	install -m 0444 man/man5/sl.conf.5 ${DESTDIR}${PREFIX}/man/man5
 	install -m 0444 etc/sl.conf ${DESTDIR}${PREFIX}/share/examples/slmon/sl.conf

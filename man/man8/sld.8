@@ -180,9 +180,17 @@ The rc script sets the user to
 Supervises children.
 It does not open the database after startup.
 .It dish
-The only process that loads
+Speaks plaintext gRPC with the built-in Perl client and never forks.
+Setting
+.Va dish_client
+to
+.Li xs
+loads
+.Li Dish.so
+when that module was built with
+.Li WITH_DISH_XS=yes .
+The default build does not link
 .Li libgrpc++ .
-It is forked before that library is loaded, and it never forks again.
 Every
 .Va dish_interval_s
 seconds (default 30) it calls

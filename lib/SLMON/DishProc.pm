@@ -42,13 +42,65 @@ sub _reachable {
 	return 1;
 }
 
-# The hash StatusMap and History already consume. Does not load the C++ bridge.
+my %SHAPE_SEEN;
+
+sub client_name {
+	my ($cfg) = @_;
+	my $name = $cfg->{dish_client} // 'perl';
+	return 'perl' if $name eq '';
+	return $name;
+}
+
+# Dish.so is built only with `make WITH_DISH_XS=yes`. The Perl client is
+# the one the default build loads.
+sub _load_xs {
+	return 1 if $INC{'SLMON/Dish.pm'};
+	my $ok = eval { require SLMON::Dish; 1 };
+	return 1 if $ok;
+	die "dish client xs is not built (make WITH_DISH_XS=yes)\n";
+}
+
+sub _note_shape {
+	my ($op, $reply) = @_;
+	return if ref $reply ne 'HASH';
+	for my $row (@{ $reply->{unknown} || [] }) {
+		next if ref $row ne 'HASH';
+		my $msg = $row->{message} // '';
+		my $num = $row->{number} // '';
+		my $key = "$op unknown $msg $num";
+		next if $SHAPE_SEEN{$key}++;
+		warn "sld: dish: $op unknown $msg field $num\n";
+	}
+	for my $row (@{ $reply->{retyped} || [] }) {
+		next if ref $row ne 'HASH';
+		my $name = $row->{name} // '';
+		my $key = "$op retyped $name";
+		next if $SHAPE_SEEN{$key}++;
+		warn "sld: dish: $op retyped $name\n";
+	}
+	return;
+}
+
+# The hash StatusMap and History already consume.
 sub _doc {
-	my ($target, $op) = @_;
+	my ($cfg, $target, $op) = @_;
+	if (client_name($cfg) eq 'xs') {
+		_load_xs();
+		my $raw = SLMON::Dish::call($target, $op);
+		my $doc = SLMON::json_decode($raw);
+		die "dish $op reply was empty\n" if ref $doc ne 'HASH';
+		return $doc;
+	}
 	my $reply = SLMON::DishWire::call($target, $op);
 	my $got = ref $reply eq 'HASH' ? ($reply->{op} // '') : '';
 	die "dish $op reply was $got\n" if $got ne $op;
+	_note_shape($op, $reply);
 	return $reply->{doc} || {};
+}
+
+sub call_doc {
+	my ($cfg, $target, $op) = @_;
+	return _doc($cfg, $target, $op);
 }
 
 sub pack_map {
@@ -99,13 +151,13 @@ sub _wait {
 }
 
 sub _try_pledge {
+	my ($xs) = @_;
 	require OpenBSD::Pledge;
 	require OpenBSD::Unveil;
-	# c-ares opens resolver files itself, so the dns promise's libc
-	# whitelist does not cover them. Abseil also probes a Linux sysfs
-	# path that is absent here; rpath lets that open return ENOENT
-	# instead of killing the process. The unveil list is the rest of
-	# what this child may read.
+	# The resolver files stay visible so a dish hostname can be looked
+	# up. prot_exec is only for the XS client: Dish.so and abseil load
+	# code, and abseil probes a Linux sysfs path that is absent here.
+	# rpath lets that open return ENOENT. The Perl client does neither.
 	my @read = (
 		'/dev/urandom',
 		'/etc/resolv.conf',
@@ -126,7 +178,9 @@ sub _try_pledge {
 		warn "sld: dish unveil lock: $! (left unpledged)\n";
 		return;
 	}
-	if (!OpenBSD::Pledge::pledge(qw(inet dns prot_exec rpath))) {
+	my @prom = qw(inet dns rpath);
+	push @prom, 'prot_exec' if $xs;
+	if (!OpenBSD::Pledge::pledge(@prom)) {
 		warn "sld: dish pledge failed: $! (left unpledged)\n";
 	}
 	return;
@@ -141,7 +195,16 @@ sub run {
 		_exec_fake($sock);
 	}
 	my $imsg = SLMON::Imsg->open(fileno($sock));
-	_try_pledge();
+	my $xs = client_name($cfg) eq 'xs';
+	if ($xs && !eval { _load_xs(); 1 }) {
+		warn "sld: dish client xs is not built (make WITH_DISH_XS=yes)\n";
+		while (1) {
+			my $wake = _wait($imsg, time + 3600);
+			last if $wake && $wake->{type} == SLMON::IMSG_SHUTDOWN;
+		}
+		exit 0;
+	}
+	_try_pledge($xs);
 	my ($host, $port) = SLMON::Config::dish_endpoint($cfg);
 	my $target = "$host:$port";
 	my $interval = $cfg->{dish_interval_s} || 30;
@@ -163,7 +226,7 @@ sub run {
 			next;
 		}
 		eval {
-			my $doc = _doc($target, 'status');
+			my $doc = _doc($cfg, $target, 'status');
 			my $row = SLMON::StatusMap::status_row($doc, $now);
 			my $info = SLMON::StatusMap::dish_info($doc, $now);
 			$boot = $info->{bootcount};
@@ -174,7 +237,7 @@ sub run {
 				$last_outage = $ev->{details} // '';
 				$imsg->send(SLMON::IMSG_EVENT, SLMON::json_encode($ev));
 			}
-			my $hdoc = _doc($target, 'history');
+			my $hdoc = _doc($cfg, $target, 'history');
 			my @samples = SLMON::History::ring_samples($hdoc, $now);
 			my $current = @samples ? $samples[-1]{counter} : undef;
 			for my $part (_chunks(\@samples)) {
@@ -185,7 +248,7 @@ sub run {
 				}));
 			}
 			if ($now >= $next_map) {
-				my $mdoc = _doc($target, 'map');
+				my $mdoc = _doc($cfg, $target, 'map');
 				$imsg->send(SLMON::IMSG_OBSTRUCTION, pack_map($mdoc, $now));
 				$next_map = $now + SLMON::MAP_POLL_S;
 			}

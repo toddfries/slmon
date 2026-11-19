@@ -38,7 +38,7 @@ Each window reads the finest tier that still covers it. `24h` prefers minutely r
 - `history_samples` older than 90 days are averaged into `metrics_hourly` and deleted. `metrics` snapshots use that same cut. Hourly rows older than 365 days are averaged into `metrics_daily` and deleted. Minutely rows older than 730 days are deleted.
 - Minute, hour, and day rows store obstruction (avg and max) from `metrics`, and jitter from the spread of the 1 Hz latencies (max minus min). Hourly compression stores average drop, average latency, min and max latency, average and max obstruction, jitter, and average throughput. A conflicting row keeps throughput already stored and fills a null obstruction or jitter. `history_samples` still has no obstruction column. The dashboard reads the rollup for obstruction when that tier has a fraction, and reads `metrics` when it does not. `24h` reads minutely rows. `7d` and `30d` read hourly rows. `365d` and `ever` read daily rows and keep an hourly row when that UTC day has no daily row. Jitter on every window is the jitter stored on those rows. Raw metrics are kept 90 days, so the obstruction fallback does not cover a full year.
 - `events`, `weather`, `speedtests`, and `alert_queue` have no delete path. `obstruction_map` is one row. `alert_queue` and `speedtests` have no writer yet.
-- The dish child is the only `libgrpc++` / `libprotobuf` process. A Perl gRPC client does not exist on this branch.
+- The dish child uses the in-tree Perl client. `dish_client = xs` loads `Dish.so` when that module was built. The default build does not link `libgrpc++`.
 - The listener is one config value, `127.0.0.1:8080`. A repeated `listen` line is not accepted yet. Login is bcrypt, the session cookie is HMAC-SHA256 for 12 hours, and login failures are rate limited. There is no delete API.
 - The dashboard can be installed from `127.0.0.1` or `localhost`. The manifest, icons, and worker are responses from the http process. The worker does not cache. The Install button appears when the browser offers the prompt. A later phase does not add a second worker or a cache of the page.
 
@@ -99,10 +99,6 @@ Known waste to remove once those numbers exist:
 - Any raw-`metrics` scan still used for obstruction or jitter. The rollup columns are filled; this phase deletes the extra query.
 - A retain or a large rollup that leaves the WAL to grow until the next checkpoint. Checkpoint after the rollup and after retain.
 - Startup rollup work that re-reads more than the open window.
-
-**Major subsystem: Perl gRPC, last in this phase.** Replace `ext/dishbridge` with an in-tree Perl client that speaks plaintext gRPC to port 9200 and does not link `libgrpc++`, `libprotobuf`, abseil, re2, or c-ares. The dish child's imsg messages stay the same, so the db child does not change. Regress keeps the fake-dish runs and gains a fixture: a captured reply the C++ client already accepts, decoded by the Perl client to the same hash. The reply-shape record stays. A field the fixture newly contains is a logged name and type, not a silent drop. If a field does not match the dish, other projects may be read as documentation for that mismatch. Their source stays out of this tree. After that cut, the dish pledge drops `prot_exec` and the filesystem unveil that existed for the C++ library. The poll must still finish inside the 5 second deadline.
-
-An exploration of that client may proceed on a side branch and may keep `ext/dishbridge` in place. The cut that removes it on this branch waits until the measurements above are written down. A smaller dependency tree is the point; a slower poll is not.
 
 ## Phase 4 — leave it running
 

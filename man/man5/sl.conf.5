@@ -65,6 +65,20 @@ replaces the default port 9200.
 .It Va dish_interval_s
 .Li 30 .
 Minimum 2.
+.It Va dish_client
+.Li perl
+or
+.Li xs .
+.Li perl
+is the built-in client and the default.
+.Li xs
+uses
+.Li Dish.so ,
+which the default build does not produce.
+Build it with
+.Li WITH_DISH_XS=yes .
+.Nm sld
+restarts the dish process when this value changes.
 .It Va log_level
 .Li info
 or

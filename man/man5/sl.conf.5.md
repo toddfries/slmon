@@ -75,6 +75,22 @@ Keys and their defaults:
 > `30`.
 > Minimum 2.
 
+*dish\_client*
+
+> `perl`
+> or
+> `xs`.
+> `perl`
+> is the built-in client and the default.
+> `xs`
+> uses
+> `Dish.so`,
+> which the default build does not produce.
+> Build it with
+> `WITH_DISH_XS=yes`.
+> **sld**
+> restarts the dish process when this value changes.
+
 *log\_level*
 
 > `info`

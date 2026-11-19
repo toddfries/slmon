@@ -305,6 +305,7 @@ sub _reload {
 	my $old_listen = $cfg->{listen};
 	my $old_dish = $cfg->{dish_host};
 	my $old_int = $cfg->{dish_interval_s};
+	my $old_client = $cfg->{dish_client} // 'perl';
 	my $old_lat = $cfg->{latitude} // '';
 	my $old_lon = $cfg->{longitude} // '';
 	my %old_ping = map { $_ => ($cfg->{$_} // '') } _ping_keys();
@@ -329,7 +330,8 @@ sub _reload {
 	_stop_worker('http');
 	_spawn('http', $ctl, $cfg, $LISTEN);
 	if (($cfg->{dish_host} // '') ne $old_dish
-	    || ($cfg->{dish_interval_s} // 0) != $old_int) {
+	    || ($cfg->{dish_interval_s} // 0) != $old_int
+	    || ($cfg->{dish_client} // 'perl') ne $old_client) {
 		_stop_worker('dish');
 		_spawn('dish', $ctl, $cfg, $LISTEN);
 	}
@@ -535,9 +537,17 @@ sub once {
 		return 0;
 	}
 	close $sock;
-	require SLMON::Dish;
-	my $json = SLMON::Dish::call("$host:$port", 'status');
-	print $json, "\n";
+	my $doc = eval {
+		SLMON::DishProc::call_doc($cfg, "$host:$port", 'status');
+	};
+	if ($@) {
+		my $err = $@;
+		$err =~ s/\s+at \S+ line \d+\.?//g;
+		$err =~ s/\s+\z//;
+		print STDERR SLMON::err($err);
+		return 1;
+	}
+	print SLMON::json_encode($doc), "\n";
 	return 0;
 }
 

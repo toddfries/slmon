@@ -66,7 +66,8 @@ database. If it dies, the parent exits and leaves restart to rc.
 
 The dish process polls every 30 seconds: one `get_history` and one
 `get_status`. The history ring is 1 Hz. The obstruction map is every 5
-minutes. Only that process loads `libgrpc++`, and only after fork.
+minutes. It uses the built-in Perl client. `dish_client = xs` uses
+`Dish.so` instead, after `make WITH_DISH_XS=yes`.
 
 The watchdog pings `1.1.1.1` and `8.8.8.8` with OpenBSD `ping -c 1 -w 2`.
 Three failures confirm a disconnect. A latency spike is a best RTT over
@@ -89,13 +90,14 @@ required. The same queries run on either driver.
 
 ## Build and regress
 
-`libgrpc` and `protobuf` come from OpenBSD ports. The dish extension links
-the system libraries.
-
 ```
 make
 make regress
 ```
+
+`make WITH_DISH_XS=yes` also builds the optional `Dish.so` module, which
+links `libgrpc++` and `protobuf` from OpenBSD ports. The default build
+does not.
 
 Regress uses `bsd.regress.mk`. It covers the auth, history, rollup,
 retention, and watchdog functions, both database drivers, and an end-to-end

@@ -1,6 +1,6 @@
 # Perl gRPC sketch
 
-Exploration on `plgrpc` only. The `sld` dish child calls `SLMON::DishWire` and does not load `SLMON::Dish`. `slctl once` still does. `ext/dishbridge` stays for that path and for the live comparison. The pledge is unchanged. No phase-3 measurements were taken.
+Landed on master. The default client is `SLMON::DishWire`. `dish_client = xs` loads `SLMON::Dish` when `Dish.so` was built with `make WITH_DISH_XS=yes`. The default build does not build that module. `slctl once` uses the same switch. The Perl pledge is `inet dns rpath`. The XS pledge adds `prot_exec`.
 
 ## What the bridge sends
 
@@ -52,6 +52,4 @@ History: `current` is a number on both sides. The four packed arrays are each 90
 
 Map: both sides are 123 by 123, and `snr` has 15129 floats, which is 123×123. `unknown` 3, `retyped` 0.
 
-`DishProc` now points at this module. The pledge still has `prot_exec` and the C++ unveil list. Dropping those waits for the phase 3 measurements.
-
-A three-minute run with `dish_interval_s` 60, one `sld` from `master` and one from this branch, wrote two SQLite files under `/tlaptop.a/tmp`. The `.schema` output was identical. Each file held one obstruction map, four status rows, and a little over a thousand distinct history counters.
+`DishProc` calls this module unless `dish_client` is `xs`. On a three-minute run the Perl client used less CPU and a smaller resident set than `Dish.so`.

@@ -8,8 +8,8 @@ use warnings;
 use FindBin;
 
 use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../blib";
-use SLMON::Dish;
 use SLMON::DishProc;
+use SLMON::DishWire;
 
 my $down = SLMON::DishProc::rpc_warn(
 	'192.168.100.1:9200',
@@ -23,9 +23,9 @@ if (open my $fh, '<', '/etc/passwd') {
 }
 my $probe = eval { SLMON::DishProc::_reachable('127.0.0.1', 1); 1 };
 die "timed connect after pledge: $@" if !$probe;
-eval { SLMON::Dish::call('127.0.0.1:1', 'status') };
+eval { SLMON::DishWire::call('127.0.0.1:1', 'status') };
 die "dish call was killed or returned success\n" if !$@;
 die "unexpected dish error: $@"
-    if $@ !~ /Connection refused|failed to connect|rpc/i;
+    if $@ !~ /Connection refused|failed to connect|connect:|rpc/i;
 print "ok dish pledge\n";
 exit 0;

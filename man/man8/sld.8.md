@@ -196,9 +196,17 @@ parent
 
 dish
 
-> The only process that loads
+> Speaks plaintext gRPC with the built-in Perl client and never forks.
+> Setting
+> *dish\_client*
+> to
+> `xs`
+> loads
+> `Dish.so`
+> when that module was built with
+> `WITH_DISH_XS=yes`.
+> The default build does not link
 > `libgrpc++`.
-> It is forked before that library is loaded, and it never forks again.
 > Every
 > *dish\_interval\_s*
 > seconds (default 30) it calls
