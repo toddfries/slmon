@@ -395,6 +395,21 @@ sub respond {
 		$data->{rev} = $rev;
 		return _html_response(200, SLMON::Dash::page($data));
 	}
+	if ($method eq 'GET' && $path eq '/export.csv') {
+		my $user = _authed($req, $ctx);
+		return _redirect('/login') if !defined $user;
+		my $range = SLMON::Dash::range_name($req->{query}{range});
+		my $data = eval { _dash_load($ctx, $range) };
+		if ($@) {
+			return _response(500, 'text/plain; charset=utf-8',
+			    "The database did not answer.\n",
+			    "Cache-Control: no-store\r\n");
+		}
+		my $body = SLMON::Dash::csv_body($data->{series});
+		return _response(200, 'text/csv; charset=utf-8', $body,
+		    "Cache-Control: no-store\r\n"
+		    . qq{Content-Disposition: attachment; filename="slmon-$range.csv"\r\n});
+	}
 	if ($method eq 'POST' && $path eq '/logout') {
 		return _redirect('/login', _clear_cookie());
 	}

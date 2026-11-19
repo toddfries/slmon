@@ -48,7 +48,6 @@ Windows, refresh, hooks, listen lines, retention knobs, debug lines, and reply-s
 
 ### Open
 
-- **CSV.** An authenticated download of the finest tier the selected window already reads, including that hourly tail. No purge button. Aging policy is phase 4.
 - **Obstruction behavior, on Dish.** Currently obstructed, average prolonged-obstruction duration, and average interval, from the latest status row (`currently_obstructed`, `obstruction_duration`, `obstruction_interval` on `metrics`). Numbers beside the fraction. Not a second series, and not rolled up.
 - **Weather, when configured.** If latitude and longitude are set, draw warning bands on the latency chart for the selected window, and a storm-versus-normal card from `weather.warning`. No coordinates are invented. `SLMON::Weather::warning` already returns `thunderstorm` for WMO 95, 96, or 99, `heavy snow` for 75 or 86, and `high wind` at 50 km/h or more. The card and the bands are the drawing.
 - **Reply shape on the dish child we have.** The C++ client records new, missing, and retyped fields on `get_status`, `get_history`, and the obstruction map, as the reply-shape rule says. This does not wait for the Perl client.

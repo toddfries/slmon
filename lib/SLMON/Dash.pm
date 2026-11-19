@@ -145,6 +145,43 @@ sub volume_bytes {
 	};
 }
 
+# The rows the window already loaded, one timestamp column, nulls empty.
+sub csv_body {
+	my ($rows) = @_;
+	my @cols = qw(
+		ts down_bytes up_bytes
+		avg_downlink_bps avg_uplink_bps
+		avg_ping_drop_rate avg_ping_latency_ms
+		min_ping_latency_ms max_ping_latency_ms
+		avg_obstr_fraction max_obstr_fraction
+		jitter_ms sample_count
+	);
+	my @sorted = sort { (_ts($a) // 0) <=> (_ts($b) // 0) }
+	    grep { defined _ts($_) } @{ $rows || [] };
+	my $out = join(',', @cols) . "\n";
+	for my $row (@sorted) {
+		my @cell;
+		for my $col (@cols) {
+			my $v = $col eq 'ts' ? _ts($row) : $row->{$col};
+			push @cell, _csv_cell($v);
+		}
+		$out .= join(',', @cell) . "\n";
+	}
+	return $out;
+}
+
+sub _csv_cell {
+	my ($v) = @_;
+	return '' if !defined $v;
+	$v = "$v";
+	return '' if $v eq '';
+	if ($v =~ /[",\r\n]/) {
+		$v =~ s/"/""/g;
+		return qq{"$v"};
+	}
+	return $v;
+}
+
 sub _earliest {
 	my (@lists) = @_;
 	my $t;
@@ -948,6 +985,8 @@ sub page {
 	    . '<div id="live" data-drawn="' . $drawn . '">'
 	    . $err
 	    . '<nav class="ranges">' . join('', @nav) . '</nav>'
+	    . '<p class="note"><a href="/export.csv?range=' . $range . '">Download CSV</a>'
+	    . ' for this window.</p>'
 	    . $cadence
 	    . '<section id="overview"><h2>Overview</h2>'
 	    . '<section class="stats">'

@@ -249,6 +249,19 @@ A null byte is left out of the sum.
 and
 .Li ever
 include an hourly row whose UTC day has no daily row.
+.It Cm GET /export.csv
+Requires the session cookie.
+.Va range
+uses the same values as
+.Pa / .
+The body is CSV of the rows that window already reads,
+including an hourly row whose UTC day has no daily row.
+A missing session redirects to
+.Pa /login .
+The file name is
+.Pa slmon-
+followed by the window.
+There is no request that deletes rows.
 .It Cm GET /login , POST /login , POST /logout
 The browser login.
 Success sets the cookie and redirects to

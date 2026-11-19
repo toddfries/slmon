@@ -276,6 +276,21 @@ The default is
 > `ever`
 > include an hourly row whose UTC day has no daily row.
 
+**GET /export.csv**
+
+> Requires the session cookie.
+> *range*
+> uses the same values as
+> */*.
+> The body is CSV of the rows that window already reads,
+> including an hourly row whose UTC day has no daily row.
+> A missing session redirects to
+> */login*.
+> The file name is
+> *slmon-*
+> followed by the window.
+> There is no request that deletes rows.
+
 **GET /login**, **POST /login**, **POST /logout**
 
 > The browser login.

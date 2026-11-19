@@ -476,6 +476,7 @@ my $home = SLMON::Http::respond(http_req('GET', '/',
 ok($home =~ /Signed in as admin/ && $home =~ m{action="/logout"}
     && $home =~ /8\.0 Mbit\/s/
     && $home =~ m{<a href="/\?range=24h" aria-current="page">24 hours</a>}
+    && $home =~ m{href="/export.csv\?range=24h"}
     && $home =~ m{href="/\?range=7d"} && $home =~ m{href="/\?range=30d"}
     && $home =~ m{href="/\?range=365d"} && $home =~ m{href="/\?range=ever">Ever</a>}
     && $home !~ /range=1h/ && $home !~ /range=6h/
@@ -563,6 +564,47 @@ my $out = SLMON::Http::respond(http_req('POST', '/logout'), $hctx);
 ok($out =~ m{\AHTTP/1.0 303 } && $out =~ m{Location: /login}
     && $out =~ /Max-Age=0/,
     'logout clears the cookie');
+my $csv_denied = SLMON::Http::respond(http_req('GET', '/export.csv',
+    query => { range => '24h' }), $hctx);
+ok($csv_denied =~ m{\AHTTP/1.0 303 } && $csv_denied =~ m{Location: /login}
+    && $csv_denied !~ /down_bytes/,
+    'csv without a session redirects to login');
+my $csv_bad = SLMON::Http::respond(http_req('GET', '/export.csv',
+    headers => { cookie => 'slmon_session=not-a-cookie' }), $hctx);
+ok($csv_bad =~ m{\AHTTP/1.0 303 } && $csv_bad =~ m{Location: /login},
+    'csv with a bad cookie redirects to login');
+my $csv_ok = SLMON::Http::respond(http_req('GET', '/export.csv',
+    headers => { cookie => "slmon_session=$tok" },
+    query => { range => '6h' }), {
+	%$hctx,
+	dash => sub {
+		return {
+			series => [
+				{ ts_minute => 2000, down_bytes => undef, up_bytes => 1,
+				    sample_count => 1 },
+				{ ts_minute => 1000, down_bytes => 10, up_bytes => 4,
+				    avg_downlink_bps => 8, sample_count => 1 },
+			],
+		};
+	},
+    });
+my ($csv_body) = $csv_ok =~ /\r\n\r\n(.*)\z/s;
+ok($csv_ok =~ m{\AHTTP/1.0 200 } && $csv_ok =~ m{text/csv}
+    && $csv_ok =~ /filename="slmon-24h.csv"/
+    && $csv_ok =~ /Cache-Control: no-store/
+    && defined $csv_body
+    && $csv_body =~ /\Ats,down_bytes,up_bytes,/
+    && $csv_body =~ /^1000,10,4,8,/m
+    && $csv_body =~ /^2000,,1,/m,
+    'csv is the signed-in window and an unknown range is 24h');
+my $csv_err = SLMON::Http::respond(http_req('GET', '/export.csv',
+    headers => { cookie => "slmon_session=$tok" }), {
+	%$hctx,
+	dash => sub { die "db closed\n" },
+    });
+ok($csv_err =~ m{\AHTTP/1.0 500 } && $csv_err =~ /did not answer/
+    && $csv_err !~ /db closed/,
+    'csv hides a database failure');
 my $ugly = SLMON::Auth::sign_session('a<b"c', time + 3600, $secret);
 my $escaped = SLMON::Http::respond(http_req('GET', '/',
     headers => { cookie => "slmon_session=$ugly" }), {
@@ -697,6 +739,21 @@ ok(SLMON::Dash::fmt_bytes(undef) eq 'n/a'
     && SLMON::Dash::fmt_bytes(2_000_000_000) eq '2.0 GB'
     && SLMON::Dash::fmt_bytes(250_000_000) eq '250.0 MB',
     'byte totals use decimal units');
+my $csv_rows = SLMON::Dash::merge_unrolled(
+    [{ ts_day => 86400, down_bytes => 100, up_bytes => 10,
+	avg_downlink_bps => 1, sample_count => 2 }],
+    [
+	{ ts_hour => 86400 + 3600, down_bytes => 999, up_bytes => 9 },
+	{ ts_hour => 2 * 86400, down_bytes => 7, up_bytes => undef,
+	    avg_downlink_bps => 4, sample_count => 1 },
+    ],
+);
+my $csv_text = SLMON::Dash::csv_body($csv_rows);
+ok($csv_text =~ /\Ats,down_bytes,up_bytes,/
+    && $csv_text =~ /^86400,100,10,1,/m
+    && $csv_text =~ /^172800,7,,4,/m
+    && $csv_text !~ /999/,
+    'csv is the window tier and leaves a null empty');
 my $ever_html = SLMON::Dash::page({
     user => 'admin',
     range => 'ever',

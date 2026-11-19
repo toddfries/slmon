@@ -121,7 +121,9 @@ outage calendar for the selected window, then lists recent events.
 7 and 30 days use the hourly rollup. 365 days and the whole collection use
 the daily rollup, plus an hourly row for any UTC day that has no daily row.
 The whole collection has no start time. Its charts begin at the earliest
-sample. Obstruction is the average stored on those rows, or status polls
+sample. A signed-in browser can download the rows that window reads at
+`/export.csv?range=24h` (the same range values as the page). The link is
+on the page. A missing session is sent to the login form. Obstruction is the average stored on those rows, or status polls
 when the rollup has no obstruction yet. Those polls are kept 90 days.
 Jitter is the spread of the 1 Hz latencies in the bucket (highest minus
 lowest), stored on the same rows.
