@@ -1,11 +1,11 @@
 REGRESS_TARGETS = run-unit run-imsg run-dish-pledge run-db-sqlite run-db-pg \
-	run-e2e-sqlite run-e2e-pg run-daemon run-live
+	run-e2e-sqlite run-e2e-pg run-daemon run-live run-plgrpc
 
 PERL = /usr/bin/perl
 ROOT = ${.CURDIR:H}
 CLEANFILES += ptyfeed
 
-.PHONY: ${REGRESS_TARGETS}
+.PHONY: ${REGRESS_TARGETS} run-plgrpc-live
 
 ptyfeed: ptyfeed.c
 	cc -g -O2 -Wall -o ptyfeed ptyfeed.c -lutil
@@ -41,5 +41,12 @@ run-live:
 	else \
 		echo "SKIP live dish: 192.168.100.1:9200 does not answer" >&2; \
 	fi
+
+run-plgrpc:
+	cd ${ROOT} && ${PERL} regress/plgrpc.pl
+
+# One status, one history, one map against the dish. Not a REGRESS_TARGET.
+run-plgrpc-live:
+	cd ${ROOT} && PERL5LIB=lib:blib ${PERL} regress/plgrpc-live.pl
 
 .include <bsd.regress.mk>

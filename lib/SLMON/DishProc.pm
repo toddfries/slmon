@@ -10,6 +10,7 @@ use IO::Socket::INET;
 use IO::Select ();
 use SLMON ();
 use SLMON::Config;
+use SLMON::DishWire;
 use SLMON::History;
 use SLMON::Imsg;
 use SLMON::StatusMap;
@@ -39,6 +40,15 @@ sub _reachable {
 	return 0 if !$sock;
 	close $sock;
 	return 1;
+}
+
+# The hash StatusMap and History already consume. Does not load the C++ bridge.
+sub _doc {
+	my ($target, $op) = @_;
+	my $reply = SLMON::DishWire::call($target, $op);
+	my $got = ref $reply eq 'HASH' ? ($reply->{op} // '') : '';
+	die "dish $op reply was $got\n" if $got ne $op;
+	return $reply->{doc} || {};
 }
 
 sub pack_map {
@@ -130,7 +140,6 @@ sub run {
 	if ($ENV{SLMON_DISH_CMD}) {
 		_exec_fake($sock);
 	}
-	require SLMON::Dish;
 	my $imsg = SLMON::Imsg->open(fileno($sock));
 	_try_pledge();
 	my ($host, $port) = SLMON::Config::dish_endpoint($cfg);
@@ -154,8 +163,7 @@ sub run {
 			next;
 		}
 		eval {
-			my $raw = SLMON::Dish::call($target, 'status');
-			my $doc = SLMON::json_decode($raw);
+			my $doc = _doc($target, 'status');
 			my $row = SLMON::StatusMap::status_row($doc, $now);
 			my $info = SLMON::StatusMap::dish_info($doc, $now);
 			$boot = $info->{bootcount};
@@ -166,8 +174,7 @@ sub run {
 				$last_outage = $ev->{details} // '';
 				$imsg->send(SLMON::IMSG_EVENT, SLMON::json_encode($ev));
 			}
-			my $hraw = SLMON::Dish::call($target, 'history');
-			my $hdoc = SLMON::json_decode($hraw);
+			my $hdoc = _doc($target, 'history');
 			my @samples = SLMON::History::ring_samples($hdoc, $now);
 			my $current = @samples ? $samples[-1]{counter} : undef;
 			for my $part (_chunks(\@samples)) {
@@ -178,8 +185,7 @@ sub run {
 				}));
 			}
 			if ($now >= $next_map) {
-				my $mraw = SLMON::Dish::call($target, 'map');
-				my $mdoc = SLMON::json_decode($mraw);
+				my $mdoc = _doc($target, 'map');
 				$imsg->send(SLMON::IMSG_OBSTRUCTION, pack_map($mdoc, $now));
 				$next_map = $now + SLMON::MAP_POLL_S;
 			}
