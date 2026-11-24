@@ -700,6 +700,36 @@ ok($sky =~ /id="dish"/ && $sky =~ /class="bore" cx="8.0" cy="8.0"/
     && $sky =~ /The ring is the boresight/
     && $sky =~ /id="history"/ && $sky =~ /class="outage"/,
     'the page shows the boresight and the outage calendar');
+my $beh = SLMON::Dash::page({
+	user => 'ops',
+	now => 1000,
+	range => '24h',
+	latest => {
+		ts => 1000,
+		obstr_fraction => 0.125,
+		currently_obstructed => 1,
+		obstruction_duration => 8,
+		obstruction_interval => 90,
+	},
+});
+ok($beh =~ /id="dish"/
+    && $beh =~ /Fraction<\/span><b>12\.500%/
+    && $beh =~ /Currently obstructed<\/span><b>yes</
+    && $beh =~ /Prolonged duration<\/span><b>8s</
+    && $beh =~ /Prolonged interval<\/span><b>1m 30s</,
+    'dish shows the latest obstruction beside the fraction');
+my $clear = SLMON::Dash::page({
+	user => 'ops',
+	now => 1000,
+	range => '24h',
+	latest => { ts => 1000, obstr_fraction => 0, currently_obstructed => 0 },
+});
+ok($clear =~ /id="dish"/
+    && $clear =~ /Fraction<\/span><b>0\.000%/
+    && $clear =~ /Currently obstructed<\/span><b>no</
+    && $clear =~ /Prolonged duration<\/span><b>n\/a</
+    && $clear =~ /Prolonged interval<\/span><b>n\/a</,
+    'a clear dish shows zero fraction and no prolonged sample');
 ok(join(' ', SLMON::StatusMap::alert_names(2)) eq 'motors_stuck',
     'alert bits decode to names');
 ok(SLMON::Dash::range_name('6h') eq '24h'

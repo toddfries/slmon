@@ -1209,6 +1209,15 @@ sub page {
 	my $loss = _num($latest->{ping_drop_rate});
 	my $ob = _num($latest->{obstr_fraction});
 	my $lat = _num($latest->{ping_latency_ms});
+	my $ob_now = _num($latest->{currently_obstructed});
+	my $ob_word = defined $ob_now ? ($ob_now ? 'yes' : 'no') : 'n/a';
+	# Latest status row only. Not a series and not a rollup.
+	my $ob_stats = '<section class="stats">'
+	    . _stat('Fraction', defined $ob ? sprintf('%.3f%%', $ob * 100) : 'n/a')
+	    . _stat('Currently obstructed', $ob_word)
+	    . _stat('Prolonged duration', fmt_span($latest->{obstruction_duration}))
+	    . _stat('Prolonged interval', fmt_span($latest->{obstruction_interval}))
+	    . '</section>';
 	my $view = ref $d->{view} eq 'HASH' ? $d->{view} : view_from();
 	my $rev = defined $d->{rev} ? $d->{rev} : '';
 	my $drawn = int($now);
@@ -1289,6 +1298,7 @@ sub page {
 	    . '<section id="quality"><h2>Quality</h2>' . $quality . '</section>'
 	    . '<section id="throughput"><h2>Throughput</h2>' . $throughput . '</section>'
 	    . '<section id="dish"><h2>Dish</h2>'
+	    . $ob_stats
 	    . $id
 	    . (@dish ? '<p class="note">' . _he(join(' · ', @dish)) . '</p>' : '')
 	    . $alert
