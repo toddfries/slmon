@@ -19,7 +19,7 @@ $SLMON::PROG = 'slctl';
 
 sub usage {
 	die <<"END";
-usage: slctl init|passwd|status|once [-c file] [-d db] [-l host:port]
+usage: slctl init|passwd|status|top|once [-c file] [-d db] [-l host:port]
 END
 }
 
@@ -62,6 +62,8 @@ if ($cmd eq 'init') {
 	exit($how eq 'reset' ? 0 : 1);
 } elsif ($cmd eq 'status') {
 	exit SLMON::Parent::status($cfg);
+} elsif ($cmd eq 'top') {
+	exit SLMON::Parent::top($cfg);
 } elsif ($cmd eq 'once') {
 	exit SLMON::Parent::once($cfg);
 } else {

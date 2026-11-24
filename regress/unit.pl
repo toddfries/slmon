@@ -13,6 +13,7 @@ use SLMON::DB;
 use MIME::Base64 qw(encode_base64);
 use SLMON::Dash;
 use SLMON::Http;
+use SLMON::Parent;
 use SLMON::StatusMap;
 use SLMON::History;
 use SLMON::Obstruction;
@@ -133,6 +134,20 @@ eval { SLMON::Config::parse("dish_client = cpp\n") };
 ok($@ && $@ =~ /dish_client/, 'dish client must be perl or xs');
 eval { SLMON::Config::parse("nope = 1\n") };
 ok($@ && $@ =~ /unknown config key/, 'unknown key rejected');
+ok(@{ $cfg->{listens} } == 1 && $cfg->{listen} eq '127.0.0.1:8080',
+    'default is one listen line');
+my $multi = SLMON::Config::parse("listen = 127.0.0.1:8080\nlisten = [::1]:8080\n");
+ok($multi->{listen} eq '127.0.0.1:8080'
+    && $multi->{listens}[1] eq '[::1]:8080'
+    && @{ $multi->{listens} } == 2,
+    'a repeated listen line is kept');
+my $plain6 = SLMON::Config::parse("listen = ::1:9090\n");
+ok($plain6->{listen} eq '[::1]:9090', 'an ipv6 listen is bracketed');
+eval { SLMON::Config::parse("listen = [::1]:80\n") };
+ok($@ && $@ =~ /listen port/, 'an ipv6 port below 1024 is rejected');
+SLMON::Config::apply_paths($multi, listen => '127.0.0.1:18080');
+ok(@{ $multi->{listens} } == 1 && $multi->{listen} eq '127.0.0.1:18080',
+    '-l replaces every listen line');
 eval { SLMON::Config::parse("db = pg\n") };
 ok($@ && $@ =~ /pg_db/, 'pg without pg_db rejected');
 my $pg = SLMON::Config::parse("db = pg\npg_db = slmon\n");
@@ -504,7 +519,10 @@ ok($home =~ /id="live" data-drawn="/
     && $home =~ /Obstruction map every 5 min/
     && $home =~ /Listen 127\.0\.0\.1:8080/
     && $home =~ /Database sqlite/
-    && $home =~ /raw 90 days/,
+    && $home =~ /raw 90 days/
+    && $home =~ /id="sla"/
+    && $home =~ />100%</
+    && $home =~ /A ping sample is not an outage/,
     'dashboard shows config and redraws on the dish interval');
 my $fast_view = SLMON::Dash::view_from({
     dish_interval_s => 4,
@@ -804,6 +822,91 @@ my %dc = _colnames($oldh, 'metrics_daily');
 ok($mc{jitter_ms} && $hc{jitter_ms} && $hc{max_obstr_fraction}
     && $hc{min_ping_latency_ms} && $dc{jitter_ms} && $dc{max_obstr_fraction},
     'an existing database gains the rollup columns');
+
+my $sla = SLMON::Dash::sla([
+	{ ts => 1000, type => 'ping_ok', details => 'ok' },
+	{ ts => 1100, type => 'disconnect', details => 'down' },
+	{ ts => 1400, type => 'disconnect', details => 'up', duration_s => 300 },
+	{ ts => 2000, type => 'latency_spike', duration_s => 40, details => 'rtt_ms=9' },
+	{ ts => 2500, type => 'obstruction', details => 'fraction=0.2' },
+	{ ts => 3000, type => 'dish_outage', duration_s => 10,
+	    details => 'cause=1 start_ns=2600000000000' },
+], 1000, 4000);
+my %hour;
+$hour{(localtime($_))[2]}++ for (1100, 1960, 2600);
+my $hours_ok = 1;
+for my $h (0 .. 23) {
+	$hours_ok = 0 if ($sla->{hours}[$h] || 0) != ($hour{$h} || 0);
+}
+ok(abs($sla->{uptime} - (2650 / 3000)) < 1e-9
+    && $sla->{down_s} == 350
+    && $sla->{longest_s} == 300
+    && $sla->{mtbo_s} == 580
+    && $sla->{n} == 3
+    && $hours_ok,
+    'sla ignores ping samples and pairs a disconnect');
+my @open = SLMON::Dash::open_events([
+	{ ts => 1000, type => 'disconnect', details => 'down' },
+	{ ts => 1400, type => 'disconnect', details => 'up', duration_s => 300 },
+	{ ts => 1800, type => 'disconnect', details => 'down' },
+	{ ts => 2000, type => 'dish_outage', duration_s => 10,
+	    details => 'cause=1 start_ns=1900000000000' },
+	{ ts => 2100, type => 'obstruction', details => 'fraction=0.1' },
+], 5000);
+ok(@open == 1 && $open[0]{type} eq 'disconnect' && $open[0]{ts} == 1800,
+    'an open event is a disconnect that has not come back');
+my $top = SLMON::Dash::top_text({
+	ts => 1800, downlink_bps => 10, uplink_bps => 2,
+	ping_latency_ms => 5, ping_drop_rate => 0,
+	obstr_fraction => 0.1, uptime_s => 9, device_id => 'SECRET',
+}, [{ ts => 1800, type => 'disconnect', details => 'down' }], 2000);
+ok($top =~ /\Alatest_ts: 1800\n/
+    && $top =~ /down_bps: 10\n/
+    && $top =~ /open:\n1800 disconnect down\n\z/
+    && $top !~ /SECRET/,
+    'top shows the latest sample and hides the device id');
+
+my $bound = SLMON::Config::parse("listen = 127.0.0.1:0\nlisten = [::1]:0\n");
+my @socks = SLMON::Parent::bind_listeners($bound);
+ok(@socks == 2, 'parent binds ipv4 and ipv6 loopback');
+my $held = $socks[0]->sockport;
+my $busy = SLMON::Config::parse("listen = 127.0.0.1:$held\nlisten = 127.0.0.1:0\n");
+my @rest = SLMON::Parent::bind_listeners($busy);
+ok(@rest == 1 && $rest[0]->sockport != $held,
+    'a failed listen line keeps the one that bound');
+close $_ for @socks, @rest;
+
+SLMON::DB::insert_metric($dbh, {
+	ts => 9_000_000_000, downlink_bps => 42, uplink_bps => 7,
+	ping_latency_ms => 11, ping_drop_rate => 0.5,
+	obstr_fraction => 0.25, uptime_s => 99,
+});
+SLMON::DB::insert_event($dbh, {
+	ts => 9_000_000_000, type => 'disconnect', details => 'down',
+});
+my $top_out = '';
+open my $top_fh, '>', \$top_out;
+my $old_fh = select $top_fh;
+my $top_rc = SLMON::Parent::top($dbcfg);
+select $old_fh;
+close $top_fh;
+ok($top_rc == 0
+    && $top_out =~ /latest_ts: 9000000000\n/
+    && $top_out =~ /down_bps: 42\n/
+    && $top_out =~ /open:\n9000000000 disconnect down\n/,
+    'slctl top reads the open database');
+
+{
+	open my $rc, '<', "$FindBin::Bin/../rc.d/sld" or die "rc.d/sld: $!";
+	my $rcbody = do { local $/; <$rc> };
+	close $rc;
+	my $src_at = index($rcbody, ". /etc/rc.d/rc.subr\n");
+	my $pexp_at = index($rcbody, "pexp=\"sld: parent\"\n");
+	my $check_at = index($rcbody, "rc_check()");
+	ok($src_at >= 0 && $pexp_at > $src_at && $check_at > $pexp_at
+	    && $rcbody =~ /rc_check\(\) \{\n\tpexp="sld: parent"\n/,
+	    'rc script sets the parent title after rc.subr');
+}
 
 print "$n tests, $fail failed\n";
 exit($fail ? 1 : 0);

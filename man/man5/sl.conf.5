@@ -53,10 +53,20 @@ is
 overrides it for one process.
 .It Va listen
 .Li 127.0.0.1:8080 .
-Must be
-.Li host:port .
-One line.
+May be repeated.
+Each value is
+.Li host:port
+or
+.Li [ipv6]:port .
+The sample file has one line.
 The port is 0 or at least 1024.
+A line that fails to bind is logged with the address and the error.
+The lines that bound keep serving.
+When
+.Va log_level
+is
+.Li debug ,
+each attempt is logged with the address and the result.
 .It Va dish_host
 .Li 192.168.100.1 .
 A suffix

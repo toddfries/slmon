@@ -58,10 +58,20 @@ Keys and their defaults:
 *listen*
 
 > `127.0.0.1:8080`.
-> Must be
-> `host:port`.
-> One line.
+> May be repeated.
+> Each value is
+> `host:port`
+> or
+> `[ipv6]:port`.
+> The sample file has one line.
 > The port is 0 or at least 1024.
+> A line that fails to bind is logged with the address and the error.
+> The lines that bound keep serving.
+> When
+> *log\_level*
+> is
+> `debug`,
+> each attempt is logged with the address and the result.
 
 *dish\_host*
 

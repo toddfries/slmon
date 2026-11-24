@@ -7,7 +7,7 @@ SLCTL(8) - System Manager's Manual
 # SYNOPSIS
 
 **slctl**
-**init**|**passwd**|**status**|**once**
+**init**|**passwd**|**status**|**top**|**once**
 \[**-c**&nbsp;*file*]
 \[**-d**&nbsp;*db*]
 \[**-l**&nbsp;*host:port*]
@@ -95,6 +95,15 @@ It does not fork a daemon.
 > **\_sl**
 > or as root.
 
+**top**
+
+> Print the latest sample and the open events.
+> The sample lines are the time, downlink and uplink bits per second,
+> latency, loss, obstruction fraction, and dish uptime.
+> An open event is a disconnect that has not come back, or a dish
+> outage whose recorded end is still at or after the current time.
+> This opens the database read-only and does not print the device id.
+
 **once**
 
 > Probe the dish once and print one status document as JSON.
@@ -149,7 +158,9 @@ or when the database directory is missing.
 exits non-zero in those cases and when the database is not
 initialized.
 **status**
-exits non-zero when the database cannot be opened.
+and
+**top**
+exit non-zero when the database cannot be opened.
 **once**
 exits 0 after printing status JSON, and also exits 0 when the dish
 port does not answer.

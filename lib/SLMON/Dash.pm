@@ -231,6 +231,33 @@ sub fmt_uptime {
 	return "${m}m";
 }
 
+sub fmt_span {
+	my ($s) = @_;
+	return 'n/a' if !defined _num($s);
+	$s = int(_num($s) + 0.5);
+	$s = 0 if $s < 0;
+	return $s . 's' if $s < 60;
+	my $d = int($s / 86400);
+	$s %= 86400;
+	my $h = int($s / 3600);
+	$s %= 3600;
+	my $m = int($s / 60);
+	my $sec = $s % 60;
+	return "${d}d ${h}h" if $d;
+	return "${h}h ${m}m" if $h;
+	return "${m}m ${sec}s" if $m && $sec;
+	return "${m}m";
+}
+
+sub fmt_ratio {
+	my ($f) = @_;
+	return 'n/a' if !defined _num($f);
+	$f = _num($f);
+	return '100%' if $f >= 1;
+	return '0%' if $f <= 0;
+	return sprintf('%.3f%%', $f * 100);
+}
+
 sub _fmt_clock {
 	my ($ts, $span) = @_;
 	return '' if !defined $ts;
@@ -522,6 +549,242 @@ sub calendar_svg {
 	    . $body . '</svg>';
 }
 
+# disconnect down waits for the matching up. dish_outage uses start_ns
+# when the details carry it. latency_spike already elapsed at ts.
+# ping_ok and obstruction are not outage spans.
+sub _outage_spans {
+	my ($events, $now) = @_;
+	my @rows = sort { (_num($a->{ts}) // 0) <=> (_num($b->{ts}) // 0) }
+	    @{ $events || [] };
+	my @down;
+	my @spans;
+	for my $row (@rows) {
+		my $type = $row->{type} // '';
+		next if $type eq '' || $type eq 'ping_ok' || $type eq 'obstruction';
+		my $ts = _num($row->{ts});
+		next if !defined $ts;
+		my $dur = _num($row->{duration_s});
+		$dur = undef if defined $dur && $dur < 0;
+		my $details = $row->{details} // '';
+		if ($type eq 'disconnect' && $details eq 'down') {
+			push @down, $ts;
+			next;
+		}
+		if ($type eq 'disconnect' && $details eq 'up') {
+			my $start = defined $dur ? $ts - $dur : undef;
+			my @keep;
+			my $closed = 0;
+			for my $d (@down) {
+				if (!$closed && $d <= $ts) {
+					$closed = 1;
+					$start = $d if !defined $start;
+					next;
+				}
+				push @keep, $d;
+			}
+			@down = @keep;
+			$start = $ts if !defined $start;
+			push @spans, { start => $start, end => $ts } if $ts > $start;
+			next;
+		}
+		if ($type eq 'dish_outage') {
+			my $start = $ts;
+			if ($details =~ /start_ns=([0-9]+(?:\.[0-9]+)?)/) {
+				$start = $1 / 1e9;
+			} elsif (defined $dur) {
+				$start = $ts - $dur;
+			}
+			my $end = defined $dur ? $start + $dur : $now;
+			push @spans, { start => $start, end => $end } if $end > $start;
+			next;
+		}
+		if (defined $dur && $dur > 0) {
+			my $start = $ts - $dur;
+			push @spans, { start => $start, end => $ts } if $ts > $start;
+		}
+	}
+	for my $d (@down) {
+		push @spans, { start => $d, end => $now } if $now > $d;
+	}
+	return @spans;
+}
+
+sub _merge_spans {
+	my @m;
+	for my $s (sort { $a->{start} <=> $b->{start} } @_) {
+		if (!@m || $s->{start} > $m[-1]{end}) {
+			push @m, { start => $s->{start}, end => $s->{end} };
+		} elsif ($s->{end} > $m[-1]{end}) {
+			$m[-1]{end} = $s->{end};
+		}
+	}
+	return @m;
+}
+
+# Uptime, longest outage, mean gap, and local hour of each outage start.
+# $from undef is the whole collection. A ping sample is not an outage.
+sub sla {
+	my ($events, $from, $to, $origin) = @_;
+	$to = time if !defined $to;
+	my @spans = _outage_spans($events, $to);
+	my $start = $from;
+	if (!defined $start) {
+		$start = $origin if defined _num($origin);
+		for my $row (@{ $events || [] }) {
+			my $ts = _num($row->{ts});
+			$start = $ts if defined $ts && (!defined $start || $ts < $start);
+		}
+		for my $s (@spans) {
+			$start = $s->{start} if !defined $start || $s->{start} < $start;
+		}
+	}
+	my @hours = (0) x 24;
+	my $empty = {
+		uptime => undef, window_s => 0, down_s => 0, longest_s => undef,
+		mtbo_s => undef, n => 0, hours => \@hours, busiest => undef,
+	};
+	return $empty if !defined $start || $to <= $start;
+	my @hit = grep { $_->{end} > $start && $_->{start} < $to } @spans;
+	my @merged = _merge_spans(@hit);
+	my $down = 0;
+	for my $s (@merged) {
+		my $a = $s->{start} < $start ? $start : $s->{start};
+		my $b = $s->{end} > $to ? $to : $s->{end};
+		$down += $b - $a if $b > $a;
+	}
+	my $window = $to - $start;
+	$down = $window if $down > $window;
+	my $longest;
+	for my $s (@merged) {
+		my $len = $s->{end} - $s->{start};
+		$longest = $len if !defined $longest || $len > $longest;
+	}
+	my $mtbo;
+	if (@merged >= 2) {
+		my $gaps = 0;
+		my $sum = 0;
+		for my $i (0 .. $#merged - 1) {
+			my $gap = $merged[$i + 1]{start} - $merged[$i]{end};
+			next if $gap < 0;
+			$sum += $gap;
+			$gaps++;
+		}
+		$mtbo = $sum / $gaps if $gaps;
+	}
+	my $busiest;
+	my $busyn = 0;
+	for my $s (@merged) {
+		my @lt = localtime(int($s->{start}));
+		my $hour = $lt[2];
+		$hours[$hour]++;
+		if (!defined $busiest
+		    || $hours[$hour] > $busyn
+		    || ($hours[$hour] == $busyn && $hour < $busiest)) {
+			$busyn = $hours[$hour];
+			$busiest = $hour;
+		}
+	}
+	return {
+		uptime   => ($window - $down) / $window,
+		window_s => $window,
+		down_s   => $down,
+		longest_s => $longest,
+		mtbo_s   => $mtbo,
+		n        => scalar(@merged),
+		hours    => \@hours,
+		busiest  => $busiest,
+	};
+}
+
+sub fmt_hours {
+	my ($hours) = @_;
+	$hours = [] if ref $hours ne 'ARRAY';
+	my @bits;
+	for my $h (0 .. 23) {
+		my $c = $hours->[$h] || 0;
+		next if $c <= 0;
+		push @bits, sprintf('%02d (%d)', $h, $c);
+	}
+	return join(', ', @bits);
+}
+
+# A disconnect down with no later up, and a dish outage whose recorded
+# end is still at or after $now.
+sub open_events {
+	my ($events, $now) = @_;
+	$now //= time;
+	my @rows = sort { (_num($a->{ts}) // 0) <=> (_num($b->{ts}) // 0) }
+	    @{ $events || [] };
+	my @down;
+	my @dish;
+	for my $row (@rows) {
+		my $type = $row->{type} // '';
+		my $ts = _num($row->{ts});
+		next if !defined $ts;
+		my $dur = _num($row->{duration_s});
+		my $details = $row->{details} // '';
+		if ($type eq 'disconnect' && $details eq 'down') {
+			push @down, { ts => $ts, type => 'disconnect', details => 'down' };
+			next;
+		}
+		if ($type eq 'disconnect' && $details eq 'up') {
+			my @keep;
+			my $closed = 0;
+			for my $d (@down) {
+				if (!$closed && $d->{ts} <= $ts) {
+					$closed = 1;
+					next;
+				}
+				push @keep, $d;
+			}
+			@down = @keep;
+			next;
+		}
+		next if $type ne 'dish_outage';
+		my $start = $ts;
+		if ($details =~ /start_ns=([0-9]+(?:\.[0-9]+)?)/) {
+			$start = $1 / 1e9;
+		} elsif (defined $dur) {
+			$start = $ts - $dur;
+		}
+		my $end = defined $dur ? $start + $dur : $now;
+		next if $end < $now;
+		push @dish, {
+			ts => $start, type => 'dish_outage', details => $details,
+		};
+	}
+	return (@down, @dish);
+}
+
+sub top_text {
+	my ($latest, $events, $now) = @_;
+	$latest = {} if ref $latest ne 'HASH';
+	$now //= time;
+	my $cell = sub {
+		my ($v) = @_;
+		return 'n/a' if !defined $v || $v eq '';
+		return $v;
+	};
+	my @open = open_events($events, $now);
+	my $body = '';
+	for my $ev (@open) {
+		my $line = $ev->{ts} . ' ' . $ev->{type};
+		$line .= ' ' . $ev->{details}
+		    if defined $ev->{details} && $ev->{details} ne '';
+		$body .= $line . "\n";
+	}
+	$body = "none\n" if $body eq '';
+	return 'latest_ts: ' . $cell->($latest->{ts}) . "\n"
+	    . 'down_bps: ' . $cell->($latest->{downlink_bps}) . "\n"
+	    . 'up_bps: ' . $cell->($latest->{uplink_bps}) . "\n"
+	    . 'latency_ms: ' . $cell->($latest->{ping_latency_ms}) . "\n"
+	    . 'loss: ' . $cell->($latest->{ping_drop_rate}) . "\n"
+	    . 'obstruction: ' . $cell->($latest->{obstr_fraction}) . "\n"
+	    . 'uptime_s: ' . $cell->($latest->{uptime_s}) . "\n"
+	    . "open:\n"
+	    . $body;
+}
+
 sub _figure {
 	my ($svg) = @_;
 	my ($title) = $svg =~ m{<title>([^<]*)</title>};
@@ -562,8 +825,13 @@ sub view_from {
 	my ($dish_host, $dish_port) = SLMON::Config::dish_endpoint({ dish_host => $host });
 	my $db = $cfg->{db};
 	$db = 'sqlite' if !defined $db || ($db ne 'sqlite' && $db ne 'pg');
-	my $listen = $cfg->{listen};
-	$listen = '127.0.0.1:8080' if !defined $listen || $listen eq '';
+	my $listen;
+	if (ref $cfg->{listens} eq 'ARRAY' && @{ $cfg->{listens} }) {
+		$listen = join ', ', @{ $cfg->{listens} };
+	} else {
+		$listen = $cfg->{listen};
+		$listen = '127.0.0.1:8080' if !defined $listen || $listen eq '';
+	}
 	return {
 		dish_host   => $dish_host,
 		dish_port   => $dish_port,
@@ -905,6 +1173,24 @@ sub page {
 	} else {
 		$map_body = '<p class="note">No obstruction map stored.</p>';
 	}
+	my $sla = ref $d->{sla} eq 'HASH'
+	    ? $d->{sla}
+	    : sla($d->{sla_events} // $d->{events}, $from, $to, $axis_from);
+	my $hour_bits = fmt_hours($sla->{hours});
+	my $hour_note = $hour_bits eq ''
+	    ? 'No outages in this window.'
+	    : 'Outages by hour: ' . $hour_bits . '.';
+	my $busiest = defined $sla->{busiest}
+	    ? sprintf('%02d', $sla->{busiest}) : 'n/a';
+	my $sla_html = '<section id="sla"><h2>SLA</h2>'
+	    . '<section class="stats">'
+	    . _stat('Uptime', fmt_ratio($sla->{uptime}))
+	    . _stat('Longest outage', fmt_span($sla->{longest_s}))
+	    . _stat('Time between outages', fmt_span($sla->{mtbo_s}))
+	    . _stat('Busiest hour', $busiest)
+	    . '</section>'
+	    . '<p class="note">' . _he($hour_note)
+	    . ' A ping sample is not an outage.</p></section>';
 	my $ev = '';
 	for my $row (@{ $d->{events} || [] }) {
 		my $ts = _num($row->{ts});
@@ -1009,7 +1295,8 @@ sub page {
 	    . $map_body
 	    . '</section>'
 	    . '<section id="history"><h2>History</h2>'
-	    . _figure(calendar_svg($d->{events}, $from, $to))
+	    . $sla_html
+	    . _figure(calendar_svg($d->{sla_events} // $d->{events}, $from, $to))
 	    . $ev . '</section>'
 	    . $cfghtml
 	    . '</div>'

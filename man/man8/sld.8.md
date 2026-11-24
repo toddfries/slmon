@@ -90,8 +90,12 @@ is left as it was.
 
 listen, dish, watchdog, weather
 
+> Each
 > *listen*
-> is bound again and the HTTP process is restarted.
+> line is bound again and the HTTP process is restarted.
+> A line that fails is logged.
+> The addresses that bound replace the previous set.
+> If none bind, the previous sockets stay.
 > *dish\_host*
 > and
 > *dish\_interval\_s*
@@ -144,8 +148,9 @@ The options are as follows:
 **-l** *host:port*
 
 > Listen address for this process.
-> Overrides
-> *listen*.
+> Replaces every
+> *listen*
+> line.
 > Port 0 asks the kernel for a free port.
 > A port from 1 to 1023 is rejected.
 
@@ -233,7 +238,8 @@ db
 http
 
 > Serves HTTP.
-> The parent binds the listen socket and passes it in.
+> The parent binds each listen socket.
+> This process inherits the ones that bound.
 > Pledge is
 > **inet**
 > only, so this process does not re-read the configuration file.
@@ -259,8 +265,14 @@ weather
 The listener is one request per connection, with
 `Connection: close`
 and a five-second read timeout.
-The default is
+The default file has one line,
 `127.0.0.1:8080`.
+Further
+*listen*
+lines are further sockets.
+The page states uptime, the longest outage, the mean time between
+outages, and the local hour of each outage, for the selected window.
+A ping sample is not an outage.
 
 **GET /**
 
@@ -367,7 +379,7 @@ The installed window opens at
 
 */var/sl/http.port*
 
-> The bound HTTP port, one line.
+> The bound HTTP ports, one per line, in the order the addresses bound.
 
 */etc/rc.d/sld*
 
@@ -379,6 +391,18 @@ The installed window opens at
 > forks itself, so
 > `rc_bg`
 > is unset.
+> *rc.subr*
+> replaces the process pattern with the daemon path.
+> The script sets it back to
+> `sld: parent`
+> after reading
+> *rc.subr*.
+> **check**
+> sets that pattern again, because
+> **stop**
+> and
+> **reload**
+> reload the pattern recorded at start.
 
 # EXIT STATUS
 

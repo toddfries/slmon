@@ -4,11 +4,13 @@ use strict;
 use warnings;
 
 use IO::Socket::INET;
+use IO::Socket::IP;
 use POSIX qw(:sys_wait_h);
 use Socket qw(AF_UNIX SOCK_STREAM PF_UNSPEC);
 use SLMON ();
 use SLMON::Auth;
 use SLMON::Config;
+use SLMON::Dash;
 use SLMON::DB;
 use SLMON::DishProc;
 use SLMON::Http;
@@ -22,7 +24,7 @@ our $DBPID;
 our %KIDS;
 our $CTL_FD;
 our $RELOAD = 0;
-our $LISTEN;
+our @LISTEN;
 
 END {
 	return if !$ACTIVE || $IS_CHILD;
@@ -161,33 +163,60 @@ sub _handshake {
 	return 'created';
 }
 
-sub _bind {
+# One socket per listen line. A line that fails is logged and skipped.
+# Dies when none bind. Debug adds the result of each attempt.
+sub bind_listeners {
 	my ($cfg) = @_;
-	my ($host, $port) = SLMON::Config::listen_endpoint($cfg);
-	my $sock = IO::Socket::INET->new(
-		LocalAddr => $host,
-		LocalPort => $port,
-		Proto     => 'tcp',
-		Listen    => 128,
-		ReuseAddr => 1,
-	) or die SLMON::err("listen $host:$port: $!");
-	return $sock;
+	my @socks;
+	my @errs;
+	my $debug = ($cfg->{log_level} // '') eq 'debug';
+	for my $ep (SLMON::Config::listen_endpoints($cfg)) {
+		my ($host, $port, $label) = @$ep;
+		my %opt = (
+			LocalHost => $host,
+			LocalPort => $port,
+			Proto     => 'tcp',
+			Listen    => 128,
+			ReuseAddr => 1,
+		);
+		$opt{V6Only} = 1 if $host =~ /:/;
+		my $sock = IO::Socket::IP->new(%opt);
+		if (!$sock) {
+			my $err = $!;
+			push @errs, "$label: $err";
+			SLMON::op("listen $label: $err");
+			SLMON::op("listen $label: failed") if $debug;
+			next;
+		}
+		my $shown = SLMON::Config::shown_listen($host, $sock->sockport);
+		SLMON::op("listening on $shown");
+		SLMON::op("listen $label: bound $shown") if $debug;
+		push @socks, $sock;
+	}
+	if (!@socks) {
+		my $why = @errs ? join('; ', @errs) : 'no address bound';
+		die SLMON::err("listen $why");
+	}
+	return @socks;
 }
 
 sub _write_port {
-	my ($cfg, $sock) = @_;
-	my $port = $sock->sockport;
+	my ($cfg, @socks) = @_;
 	my $path = "$cfg->{state_dir}/http.port";
 	my $tmp = "$path.tmp";
 	open my $fh, '>', $tmp or die SLMON::err("$tmp: $!");
-	print $fh "$port\n" or die SLMON::err("$tmp: $!");
+	for my $sock (@socks) {
+		print $fh $sock->sockport, "\n" or die SLMON::err("$tmp: $!");
+	}
 	close $fh or die SLMON::err("$tmp: $!");
 	rename $tmp, $path or die "rename $path: $!\n";
-	return $port;
+	return $socks[0]->sockport;
 }
 
 sub _spawn {
-	my ($name, $ctl, $cfg, $listen) = @_;
+	my ($name, $ctl, $cfg, $listens) = @_;
+	$listens = [] if !defined $listens;
+	$listens = [$listens] if ref $listens ne 'ARRAY';
 	my ($db_end, $wk_end) = _spair();
 	$ctl->send_fd(SLMON::IMSG_ATTACH,
 	    SLMON::json_encode({ peer => $name }), fileno($db_end));
@@ -200,12 +229,14 @@ sub _spawn {
 	if ($pid == 0) {
 		$IS_CHILD = 1;
 		$ACTIVE = 0;
-		close $listen if $name ne 'http';
+		if ($name ne 'http') {
+			close $_ for @$listens;
+		}
 		eval {
 			if ($name eq 'dish') {
 				SLMON::DishProc::run($wk_end, $cfg);
 			} elsif ($name eq 'http') {
-				SLMON::Http::run($wk_end, $listen, $cfg);
+				SLMON::Http::run($wk_end, $listens, $cfg);
 			} elsif ($name eq 'watchdog') {
 				SLMON::Watchdog::run($wk_end, $cfg);
 			} elsif ($name eq 'weather') {
@@ -302,7 +333,7 @@ sub _reload {
 		$db_changed = 1 if ($fresh->{$k} // '') ne ($cfg->{$k} // '');
 	}
 	SLMON::op('database settings wait for rcctl restart sld') if $db_changed;
-	my $old_listen = $cfg->{listen};
+	my $old_listen = join("\n", @{ $cfg->{listens} || [$cfg->{listen} // ''] });
 	my $old_dish = $cfg->{dish_host};
 	my $old_int = $cfg->{dish_interval_s};
 	my $old_client = $cfg->{dish_client} // 'perl';
@@ -313,27 +344,31 @@ sub _reload {
 		next if $keep{$k};
 		$cfg->{$k} = $fresh->{$k};
 	}
-	if (($cfg->{listen} // '') ne $old_listen) {
-		my $bound = eval { _bind($cfg) };
-		if ($@) {
-			my $err = $@;
+	my $new_listen = join("\n", @{ $cfg->{listens} || [] });
+	if ($new_listen ne $old_listen) {
+		my @bound = eval { bind_listeners($cfg) };
+		if ($@ || !@bound) {
+			my $err = $@ || 'no address bound';
 			$err =~ s/\s+\z//;
+			$err =~ s/\s+at \S+ line \d+\.?\s*\z//;
 			SLMON::op("listen not changed: $err");
-			$cfg->{listen} = $old_listen;
+			$cfg->{listens} = [split /\n/, $old_listen];
+			$cfg->{listen} = $cfg->{listens}[0] // '127.0.0.1:8080';
+			close $_ for @bound;
 		} else {
 			_stop_worker('http');
-			close $LISTEN if $LISTEN;
-			$LISTEN = $bound;
-			_write_port($cfg, $LISTEN);
+			close $_ for @LISTEN;
+			@LISTEN = @bound;
+			_write_port($cfg, @LISTEN);
 		}
 	}
 	_stop_worker('http');
-	_spawn('http', $ctl, $cfg, $LISTEN);
+	_spawn('http', $ctl, $cfg, \@LISTEN);
 	if (($cfg->{dish_host} // '') ne $old_dish
 	    || ($cfg->{dish_interval_s} // 0) != $old_int
 	    || ($cfg->{dish_client} // 'perl') ne $old_client) {
 		_stop_worker('dish');
-		_spawn('dish', $ctl, $cfg, $LISTEN);
+		_spawn('dish', $ctl, $cfg, \@LISTEN);
 	}
 	my $ping_changed = 0;
 	for my $k (_ping_keys()) {
@@ -341,7 +376,7 @@ sub _reload {
 	}
 	if ($ping_changed) {
 		_stop_worker('watchdog');
-		_spawn('watchdog', $ctl, $cfg, $LISTEN);
+		_spawn('watchdog', $ctl, $cfg, \@LISTEN);
 	}
 	my $had_wx = $old_lat ne '' && $old_lon ne '';
 	my $lat = $cfg->{latitude} // '';
@@ -351,7 +386,7 @@ sub _reload {
 		_stop_worker('weather');
 	} elsif ($want_wx && (!$had_wx || $lat ne $old_lat || $lon ne $old_lon)) {
 		_stop_worker('weather');
-		_spawn('weather', $ctl, $cfg, $LISTEN);
+		_spawn('weather', $ctl, $cfg, \@LISTEN);
 	}
 	$ctl->send(SLMON::IMSG_RELOAD, SLMON::json_encode({
 		log_level               => $cfg->{log_level},
@@ -397,7 +432,7 @@ sub _supervise {
 			sleep 1;
 		}
 		next if $$quit;
-		_spawn($name, $ctl, $cfg, $LISTEN);
+		_spawn($name, $ctl, $cfg, \@LISTEN);
 	}
 	eval { $ctl->send(SLMON::IMSG_SHUTDOWN, '{}') };
 	_kill_workers();
@@ -480,19 +515,39 @@ sub run {
 		$DBPID = undef;
 		return $how;
 	}
-	$LISTEN = _bind($cfg);
-	my $port = _write_port($cfg, $LISTEN);
-	SLMON::op("listening on $port");
+	@LISTEN = bind_listeners($cfg);
+	_write_port($cfg, @LISTEN);
 	my @workers = qw(dish http watchdog);
 	if (($cfg->{latitude} // '') ne '' && ($cfg->{longitude} // '') ne '') {
 		push @workers, 'weather';
 	}
 	for my $name (@workers) {
-		_spawn($name, $ctl, $cfg, $LISTEN);
+		_spawn($name, $ctl, $cfg, \@LISTEN);
 	}
 	_pledge_parent();
 	_supervise($ctl, $dbpid, $cfg, \$quit);
 	return;
+}
+
+sub top {
+	my ($cfg) = @_;
+	my $dbh = eval { SLMON::DB::open_db($cfg, readonly => 1) };
+	if (!$dbh) {
+		print "database: closed\n";
+		return 1;
+	}
+	my $latest = $dbh->selectrow_hashref(q{
+		SELECT ts, downlink_bps, uplink_bps, ping_latency_ms,
+		    ping_drop_rate, obstr_fraction, uptime_s
+		FROM metrics ORDER BY ts DESC LIMIT 1
+	});
+	my $events = $dbh->selectall_arrayref(q{
+		SELECT ts, type, duration_s, details FROM events
+		WHERE type != 'ping_ok'
+		ORDER BY ts DESC LIMIT 5000
+	}, { Slice => {} });
+	print SLMON::Dash::top_text($latest, $events, time);
+	return 0;
 }
 
 sub status {

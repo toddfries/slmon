@@ -1,14 +1,22 @@
 #!/bin/ksh
 #
 # sld forks itself. rc waits for that parent to exit.
-# pexp matches the process title rcctl check and rcctl stop look up.
+# rc.subr replaces pexp with the daemon path. Set the title after
+# that so a start records "sld: parent". Stop reads the recorded
+# pattern back, so check sets it again.
 
 daemon="/usr/local/sbin/sld"
 daemon_flags="-c /etc/sl.conf"
 daemon_user="_sl"
-pexp="sld: parent"
 
 . /etc/rc.d/rc.subr
+
+pexp="sld: parent"
+
+rc_check() {
+	pexp="sld: parent"
+	pgrep -T "${daemon_rtable}" -q -xf "${pexp}"
+}
 
 rc_configtest() {
 	rc_exec "${daemon} -n -c /etc/sl.conf"

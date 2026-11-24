@@ -24,7 +24,7 @@ Each window reads the finest tier that still covers it. `24h` prefers minutely r
 
 **Hooks.** A new output is a plugin. Modules live under `lib/SLMON/Notify/`. Config `notify` is a comma list, default empty. The first hook is `event`. Example send paths are `dbus`, `email`, and `discord`. A later hook or send path is a new module plus a name on that list. Phases 3, 4, and 5 raise events. They do not grow a private sender. The queue payload is the event (timestamp, type, duration, text). Plugins do not get a database handle. The contract is the manual, written in the same change as the first modules, so another person can add a mechanism without reading those modules as the spec.
 
-**Listen.** `listen` may appear more than once. Each value is an address and port this host should serve. The default file still has one line, `127.0.0.1:8080`. The parser accepts that together with an IPv6 loopback line and with further local addresses the operator writes. A line that fails to bind is logged with the address and the error. The lines that bound keep serving. The http child is the one that serves them. That behavior is queued below. Until it lands, the listener is one config value.
+**Listen.** `listen` may appear more than once. Each value is an address and port this host should serve. The default file still has one line, `127.0.0.1:8080`. The parser accepts that together with an IPv6 loopback line and with further local addresses the operator writes. A line that fails to bind is logged with the address and the error. The lines that bound keep serving. The http child is the one that serves them.
 
 **Retention knobs.** Every retention interval in this plan is a config key. The numbers below are the defaults. An operator changes the period in the config file. A code change is not required. Keys that already exist stay: `raw_retention_days` (90), `minutely_retention_days` (730), `hourly_rollup_days` (365).
 
@@ -34,13 +34,49 @@ Each window reads the finest tier that still covers it. `24h` prefers minutely r
 
 ## Already true, so later phases must not pretend otherwise
 
-- The page is Overview, Quality, Throughput, Dish, and History, for `24h`, `7d`, `30d`, `365d`, and `ever`. An unknown value, including `1h` and `6h`, is `24h`. Charts, the map, and the event list redraw in place on `dish_interval_s`, and the page reloads when `GET /health` reports a new `rev`. The obstruction grid draws a boresight ring when azimuth and elevation are known: north is up, azimuth 0 is north, elevation 90 is the center, elevation 0 is the horizon. History opens with an outage calendar. `ping_ok` is not an outage.
+- The page is Overview, Quality, Throughput, Dish, and History, for `24h`, `7d`, `30d`, `365d`, and `ever`. An unknown value, including `1h` and `6h`, is `24h`. Charts, the map, and the event list redraw in place on `dish_interval_s`, and the page reloads when `GET /health` reports a new `rev`. The obstruction grid draws a boresight ring when azimuth and elevation are known: north is up, azimuth 0 is north, elevation 90 is the center, elevation 0 is the horizon. History opens with the SLA block and an outage calendar. For the selected window the block states uptime, the longest outage, the mean time between outages, and the local hour of each outage. A disconnect is paired from its down event to the later up event. A dish outage uses `start_ns` when the details carry it. A latency spike counts for the time it had already lasted. `ping_ok` and an obstruction alert are not outages. Uptime is the share of the window outside the merged outages. The mean is omitted when fewer than two outages meet the window.
 - `history_samples` older than 90 days are averaged into `metrics_hourly` and deleted. `metrics` snapshots use that same cut. Hourly rows older than 365 days are averaged into `metrics_daily` and deleted. Minutely rows older than 730 days are deleted.
 - Minute, hour, and day rows store obstruction (avg and max) from `metrics`, and jitter from the spread of the 1 Hz latencies (max minus min). Hourly compression stores average drop, average latency, min and max latency, average and max obstruction, jitter, and average throughput. A conflicting row keeps throughput already stored and fills a null obstruction or jitter. `history_samples` still has no obstruction column. The dashboard reads the rollup for obstruction when that tier has a fraction, and reads `metrics` when it does not. `24h` reads minutely rows. `7d` and `30d` read hourly rows. `365d` and `ever` read daily rows and keep an hourly row when that UTC day has no daily row. Jitter on every window is the jitter stored on those rows. Raw metrics are kept 90 days, so the obstruction fallback does not cover a full year.
 - `events`, `weather`, `speedtests`, and `alert_queue` have no delete path. `obstruction_map` is one row. `alert_queue` and `speedtests` have no writer yet.
 - The dish child uses the in-tree Perl client. `dish_client = xs` loads `Dish.so` when that module was built. The default build does not link `libgrpc++`.
-- The listener is one config value, `127.0.0.1:8080`. A repeated `listen` line is not accepted yet. Login is bcrypt, the session cookie is HMAC-SHA256 for 12 hours, and login failures are rate limited. There is no delete API.
+- `listen` may be repeated. The default file still has one line, `127.0.0.1:8080`. Each value is `host:port` or `[ipv6]:port`. The parent binds every line. A line that fails is logged with the address and the error, and the lines that bound keep serving. If a reload binds none, the previous sockets stay. `http.port` lists one port per line. Debug logs each attempt and its result. `slctl top` prints the latest sample and the open events. An open event is a disconnect that has not come back, or a dish outage whose recorded end is still at or after now. It does not print the device id. Login is bcrypt, the session cookie is HMAC-SHA256 for 12 hours, and login failures are rate limited. There is no delete API.
 - The dashboard can be installed from `127.0.0.1` or `localhost`. The manifest, icons, and worker are responses from the http process. The worker does not cache. The Install button appears when the browser offers the prompt. A later phase does not add a second worker or a cache of the page.
+
+## Dish fields this host already sends
+
+Catalog only. Do not start it until asked. Unknown fields stay out of the database until a change below names the column. Names are the public field at that number. This host's log did not record the wire type, so a later decode still checks the type before it stores a value.
+
+`/var/log/daemon` on 2026-11-20 16:52, one `get_status`, one `get_history`, and one obstruction map. Chrome lines in that file are not the dish.
+
+Already decoded, so they were not in the burst: the four throughput and latency rings, outages, obstruction fraction and `valid_s`, the prolonged-obstruction duration and interval, the map grid, alerts, GPS validity and satellite count, boresight, and signal quality.
+
+Small values worth a later column, because this reply carried them:
+
+- Ethernet speed, status field 1016, megabits per second. Sits next to the slow-ethernet alerts. One integer on the status row.
+- Seconds obstructed, obstruction field 9, and the patch count, obstruction field 10. Beside the fraction, with the open Dish item. The valid flag, obstruction field 8, was not in this reply. `valid_s` is already stored.
+- Map minimum elevation (field 4, degrees), maximum theta (field 5, degrees), and reference frame (field 6). Frame 0 is unknown, 1 is earth, 2 is the dish. The page still draws the grid as north-up. Read the frame before changing that drawing.
+- Disablement code, status field 1024, and the downlink and uplink rate-limit reasons, fields 1044 and 1045. One code each. An event or a status line when the code is not zero. Not a series.
+- Software-update state, field 1021, seconds until a reboot is allowed, field 1031, and the update stats message, field 1026 (state, progress, whether a reboot is required, scheduled time). A reboot warning, not a chart.
+- Alignment, field 1027: whether the dish has actuators, actuator state, tilt, desired boresight against the boresight already stored, and attitude uncertainty.
+- Dish config, field 2000: snow melt, power save, and location mode. Slow. One row on the dish, not a sample series.
+- GPS filter state, GPS field 5: reset, unconverged, converged, faulted, or invalid. Next to the satellite count.
+- Input power and consumption, history fields 1010 and 1012. Both are 1 Hz float rings, the same shape as throughput. A later series has to land on the rollup the way throughput did. History field 1011 is an event log (events, start, and current time), not a ring.
+
+Present in that reply, and left until there is a reason:
+
+- Device generation, field 12, an integer. Build id, field 15, a string. Identity, not a sample. Do not log the string.
+- Ready flags, field 1019. Six booleans.
+- Actuator presence, field 1023, and signed calibrations, field 1025.
+- Initialization durations, field 1028. Ten integer seconds.
+- Connected routers, field 1040, repeated strings. Do not log them.
+- Power-line stats, field 1041. Dish and router power supply stats, field 1043, which include watts. Array power stats, field 1048.
+- Attitude quaternion, field 1049.
+- Downstream routers, field 1050.
+- Account shard, field 1051, and NAT flag, field 1053.
+- Class of service, field 1020.
+- Power-source stats, field 1059.
+
+This reply did not include mobility class, a persistently low signal flag, cell disabled, an update reboot-ready flag, reboot reason, high-power test mode, a persisted moving-fast flag, the MAC flag, the obstruction valid flag, GPS "no satellites after first fix", or the other device-info fields (partition match, dev build, anti-rollback, hardware-in-the-loop, manufactured version, co-housed, board revision, hardware index, boot info).
 
 ## Phase 2 — see the record and act on it
 
@@ -48,9 +84,9 @@ Windows, refresh, hooks, listen lines, retention knobs, debug lines, and reply-s
 
 ### Open
 
-- **Obstruction behavior, on Dish.** Currently obstructed, average prolonged-obstruction duration, and average interval, from the latest status row (`currently_obstructed`, `obstruction_duration`, `obstruction_interval` on `metrics`). Numbers beside the fraction. Not a second series, and not rolled up.
+- **Obstruction behavior, on Dish.** Currently obstructed, average prolonged-obstruction duration, and average interval, from the latest status row (`currently_obstructed`, `obstruction_duration`, `obstruction_interval` on `metrics`). Numbers beside the fraction. Not a second series, and not rolled up. The same reply also carried seconds obstructed and a patch count. Those two stay in the catalog below until this item is asked.
 - **Weather, when configured.** If latitude and longitude are set, draw warning bands on the latency chart for the selected window, and a storm-versus-normal card from `weather.warning`. No coordinates are invented. `SLMON::Weather::warning` already returns `thunderstorm` for WMO 95, 96, or 99, `heavy snow` for 75 or 86, and `high wind` at 50 km/h or more. The card and the bands are the drawing.
-- **Reply shape on the dish child we have.** The C++ client records new, missing, and retyped fields on `get_status`, `get_history`, and the obstruction map, as the reply-shape rule says. This does not wait for the Perl client.
+- **Reply shape on the dish child we have.** The Perl client warns once per unknown field number and once per retyped name. It does not yet warn when a stored field is missing. The 2026-11-20 burst is the catalog below. The info line is the message and the field number. It does not include the wire type.
 - **Health score.** One number, 0–100, for the selected window, with the factor breakdown: drop 30, latency 25, obstruction 20, uptime 15, alerts 10. Show the factors, not only the total. Nothing in this tree maps a measurement onto those points. The score stays uncomputed until that mapping is written here. Do not invent the mapping in the change that draws the number.
 
 ### Queued
@@ -58,9 +94,7 @@ Windows, refresh, hooks, listen lines, retention knobs, debug lines, and reply-s
 Do not start these until asked. Order:
 
 1. **Peaks, on Throughput and Quality.** Peak download, peak upload, and the lowest latency in the selected window. Minute rows already store `max_downlink_bps`, `max_uplink_bps`, and `min_ping_latency_ms`. Hour and day rows do not store a peak rate. The same change adds those columns, so a long window does not invent a peak from an average.
-2. **SLA math, same windows.** For whichever of the five windows is selected: uptime, longest outage, mean time between outages, and which hour of the day the outages fell in. `ping_ok` is not an outage.
-3. **`slctl top` and `GET /metrics`.** `slctl top` is a terminal view of the latest sample and the open events. `/metrics` is Prometheus text for the latest sample. It requires the session cookie. A config key may open it without a cookie on the listen lines; the default is closed. Neither one adds a window set.
-4. **More than one listen line.** The parent binds every `listen` value and the http child serves each socket that bound. IPv4 loopback and IPv6 loopback are both accepted in one file. Further local addresses are further lines. The man page shows the repeated key. Debug logs each bind with the address and the result. The default file stays one line, `127.0.0.1:8080`.
+2. **`GET /metrics`.** Prometheus text for the latest sample. It requires the session cookie. A config key may open it without a cookie on the listen lines; the default is closed. It does not add a window set.
 
 ### Later in this phase
 

@@ -41,6 +41,7 @@ sub parse {
 	my ($text) = @_;
 	$text //= '';
 	my %cfg = %DEFAULT;
+	my @listen_lines;
 	my $n = 0;
 	for my $line (split /\n/, $text) {
 		$n++;
@@ -49,6 +50,10 @@ sub parse {
 			die SLMON::err("config line $n is not key = value");
 		}
 		my ($k, $v) = ($1, $2);
+		if ($k eq 'listen') {
+			push @listen_lines, $v;
+			next;
+		}
 		die SLMON::err("unknown config key $k") if !exists $DEFAULT{$k};
 		$cfg{$k} = $v;
 	}
@@ -74,7 +79,14 @@ sub parse {
 		die SLMON::err('longitude is not a number') if $cfg{longitude} !~ /\A-?[0-9]+(?:\.[0-9]+)?\z/;
 	}
 	$cfg{db_path} = '/var/sl/sl.db' if !defined $cfg{db_path} || $cfg{db_path} eq '';
-	listen_endpoint(\%cfg);
+	@listen_lines = ($DEFAULT{listen}) if !@listen_lines;
+	my @canon;
+	for my $spec (@listen_lines) {
+		my ($host, $port) = _split_listen($spec);
+		push @canon, _canon_listen($host, $port);
+	}
+	$cfg{listens} = \@canon;
+	$cfg{listen} = $canon[0];
 	return \%cfg;
 }
 
@@ -102,21 +114,66 @@ sub dish_endpoint {
 	return ($host, $port);
 }
 
-sub listen_endpoint {
-	my ($cfg) = @_;
-	my $spec = $cfg->{listen};
-	die SLMON::err('listen must be host:port') if $spec !~ /\A(.+):([0-9]+)\z/;
-	my $port = int($2);
+# host:port, or [ipv6]:port. The port is 0 or at least 1024.
+sub _split_listen {
+	my ($spec) = @_;
+	$spec //= '';
+	my ($host, $port);
+	if ($spec =~ /\A\[([^\]]+)\]:([0-9]+)\z/) {
+		($host, $port) = ($1, int($2));
+	} elsif ($spec =~ /\A(.+):([0-9]+)\z/) {
+		($host, $port) = ($1, int($2));
+	} else {
+		die SLMON::err('listen must be host:port');
+	}
+	die SLMON::err('listen must be host:port') if $host eq '';
 	die SLMON::err('listen port must be 0 or at least 1024')
 	    if $port != 0 && $port < 1024;
-	return ($1, $port);
+	return ($host, $port);
+}
+
+sub _canon_listen {
+	my ($host, $port) = @_;
+	return "[$host]:$port" if $host =~ /:/;
+	return "$host:$port";
+}
+
+sub shown_listen {
+	my ($host, $port) = @_;
+	return _canon_listen($host, $port);
+}
+
+sub listen_endpoint {
+	my ($cfg) = @_;
+	my ($host, $port) = _split_listen($cfg->{listen});
+	return ($host, $port);
+}
+
+# [host, port, label] for every listen line, in file order.
+sub listen_endpoints {
+	my ($cfg) = @_;
+	my @specs;
+	if (ref $cfg->{listens} eq 'ARRAY' && @{ $cfg->{listens} }) {
+		@specs = @{ $cfg->{listens} };
+	} elsif (defined $cfg->{listen} && $cfg->{listen} ne '') {
+		@specs = ($cfg->{listen});
+	}
+	die SLMON::err('listen must be host:port') if !@specs;
+	my @out;
+	for my $spec (@specs) {
+		my ($host, $port) = _split_listen($spec);
+		push @out, [$host, $port, _canon_listen($host, $port)];
+	}
+	return @out;
 }
 
 sub apply_paths {
 	my ($cfg, %opt) = @_;
 	if (defined $opt{listen} && $opt{listen} ne '') {
-		$cfg->{listen} = $opt{listen};
-		listen_endpoint($cfg);
+		my ($host, $port) = _split_listen($opt{listen});
+		my $label = _canon_listen($host, $port);
+		$cfg->{listen} = $label;
+		$cfg->{listens} = [$label];
 	}
 	my $db_path = $opt{db_path};
 	$db_path = $ENV{SLMON_DB} if !defined $db_path || $db_path eq '';

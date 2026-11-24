@@ -88,8 +88,12 @@ A file that does not parse is logged and the running configuration
 is left as it was.
 .Bl -tag -width Ds
 .It listen, dish, watchdog, weather
+Each
 .Va listen
-is bound again and the HTTP process is restarted.
+line is bound again and the HTTP process is restarted.
+A line that fails is logged.
+The addresses that bound replace the previous set.
+If none bind, the previous sockets stay.
 .Va dish_host
 and
 .Va dish_interval_s
@@ -134,8 +138,9 @@ Regress uses this.
 Standard error stays open.
 .It Fl l Ar host:port
 Listen address for this process.
-Overrides
-.Va listen .
+Replaces every
+.Va listen
+line.
 Port 0 asks the kernel for a free port.
 A port from 1 to 1023 is rejected.
 .It Fl n
@@ -213,7 +218,8 @@ and
 without restarting it.
 .It http
 Serves HTTP.
-The parent binds the listen socket and passes it in.
+The parent binds each listen socket.
+This process inherits the ones that bound.
 Pledge is
 .Cm inet
 only, so this process does not re-read the configuration file.
@@ -234,8 +240,14 @@ are set.
 The listener is one request per connection, with
 .Li Connection: close
 and a five-second read timeout.
-The default is
+The default file has one line,
 .Li 127.0.0.1:8080 .
+Further
+.Va listen
+lines are further sockets.
+The page states uptime, the longest outage, the mean time between
+outages, and the local hour of each outage, for the selected window.
+A ping sample is not an outage.
 .Bl -tag -width Ds
 .It Cm GET /
 With no session, redirects to
@@ -326,7 +338,7 @@ SQLite WAL and shared-memory files live beside it.
 Temporary tables stay in memory, because the database child unveils
 only this directory.
 .It Pa /var/sl/http.port
-The bound HTTP port, one line.
+The bound HTTP ports, one per line, in the order the addresses bound.
 .It Pa /etc/rc.d/sld
 rc script.
 .Ev daemon_user
@@ -336,6 +348,18 @@ is
 forks itself, so
 .Ev rc_bg
 is unset.
+.Pa rc.subr
+replaces the process pattern with the daemon path.
+The script sets it back to
+.Li sld: parent
+after reading
+.Pa rc.subr .
+.Cm check
+sets that pattern again, because
+.Cm stop
+and
+.Cm reload
+reload the pattern recorded at start.
 .El
 .Sh EXIT STATUS
 .Fl n

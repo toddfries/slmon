@@ -327,6 +327,27 @@ sub _dash_load {
 	my $info = _db_query($ctx->{imsg}, { op => 'latest', table => 'dish_info' });
 	my $events = _db_query($ctx->{imsg},
 	    _bounded('events', $from, $now, 30, 'desc'));
+	# A down that started before the window still overlaps it.
+	my $look = defined $from ? $from - 90 * 86400 : undef;
+	my $sla_events = _db_query($ctx->{imsg},
+	    _bounded('events', $look, $now, 50000, 'desc'));
+	my $origin;
+	if (!defined $from) {
+		for my $row (@$series) {
+			my $ts = $row->{ts} // $row->{ts_minute}
+			    // $row->{ts_hour} // $row->{ts_day};
+			next if !defined $ts || $ts !~ /\A-?[0-9]+(?:\.[0-9]+)?\z/;
+			$ts = int($ts);
+			$origin = $ts if !defined $origin || $ts < $origin;
+		}
+	}
+	my $sla = SLMON::Dash::sla($sla_events, $from, $now, $origin);
+	if (($ctx->{log_level} // '') eq 'debug') {
+		warn 'sld: sla range=' . $range
+		    . ' outages=' . ($sla->{n} // 0)
+		    . ' window_s=' . ($sla->{window_s} // 0)
+		    . ' down_s=' . ($sla->{down_s} // 0) . "\n";
+	}
 	my $map = _db_query($ctx->{imsg}, { op => 'latest', table => 'obstruction_map' });
 	return {
 		series       => $series,
@@ -335,6 +356,8 @@ sub _dash_load {
 		latest       => $latest->[0],
 		info         => $info->[0],
 		events       => $events,
+		sla_events   => $sla_events,
+		sla          => $sla,
 		map          => $map->[0],
 		window_from  => $from,
 		window_to    => $now,
@@ -493,7 +516,8 @@ sub _handle_client {
 }
 
 sub run {
-	my ($sock, $listen, $cfg) = @_;
+	my ($sock, $listens, $cfg) = @_;
+	$listens = [$listens] if ref $listens ne 'ARRAY';
 	SLMON::proc_title('http');
 	$SIG{PIPE} = 'IGNORE';
 	$SIG{TERM} = sub { exit 0 };
@@ -511,9 +535,10 @@ sub run {
 	OpenBSD::Pledge::pledge('inet')
 	    or die "sld: http pledge: $!\n";
 	my $rate = SLMON::Auth::rate_new();
+	my @lfds = map { fileno($_) } @$listens;
 	while (1) {
 		my $rin = '';
-		vec($rin, fileno($listen), 1) = 1;
+		vec($rin, $_, 1) = 1 for @lfds;
 		vec($rin, $imsg->fd, 1) = 1;
 		my $n = select($rin, undef, undef, 1);
 		if (vec($rin, $imsg->fd, 1)) {
@@ -523,12 +548,15 @@ sub run {
 				exit 0 if $m->{type} == SLMON::IMSG_SHUTDOWN;
 			}
 		}
-		next if !$n || !vec($rin, fileno($listen), 1);
-		my $cli = $listen->accept;
-		next if !$cli;
-		eval { _handle_client($cli, $imsg, $secret, $admin, $rate, $cfg) };
-		warn "sld: http client: $@" if $@;
-		close $cli;
+		next if !$n;
+		for my $i (0 .. $#$listens) {
+			next if !vec($rin, $lfds[$i], 1);
+			my $cli = $listens->[$i]->accept;
+			next if !$cli;
+			eval { _handle_client($cli, $imsg, $secret, $admin, $rate, $cfg) };
+			warn "sld: http client: $@" if $@;
+			close $cli;
+		}
 	}
 }
 

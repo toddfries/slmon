@@ -7,7 +7,7 @@
 .Nd control the Starlink dish monitor
 .Sh SYNOPSIS
 .Nm slctl
-.Cm init Ns | Ns Cm passwd Ns | Ns Cm status Ns | Ns Cm once
+.Cm init Ns | Ns Cm passwd Ns | Ns Cm status Ns | Ns Cm top Ns | Ns Cm once
 .Op Fl c Ar file
 .Op Fl d Ar db
 .Op Fl l Ar host:port
@@ -91,6 +91,13 @@ The database is mode 0600 and owned by
 so this is run as
 .Sy _sl
 or as root.
+.It Cm top
+Print the latest sample and the open events.
+The sample lines are the time, downlink and uplink bits per second,
+latency, loss, obstruction fraction, and dish uptime.
+An open event is a disconnect that has not come back, or a dish
+outage whose recorded end is still at or after the current time.
+This opens the database read-only and does not print the device id.
 .It Cm once
 Probe the dish once and print one status document as JSON.
 This does not start
@@ -136,7 +143,9 @@ or when the database directory is missing.
 exits non-zero in those cases and when the database is not
 initialized.
 .Cm status
-exits non-zero when the database cannot be opened.
+and
+.Cm top
+exit non-zero when the database cannot be opened.
 .Cm once
 exits 0 after printing status JSON, and also exits 0 when the dish
 port does not answer.
