@@ -349,7 +349,7 @@ sub _dash_load {
 		    . ' down_s=' . ($sla->{down_s} // 0) . "\n";
 	}
 	my $map = _db_query($ctx->{imsg}, { op => 'latest', table => 'obstruction_map' });
-	return {
+	my %page = (
 		series       => $series,
 		obstruction  => $obstruction,
 		jitter       => $series,
@@ -361,7 +361,13 @@ sub _dash_load {
 		map          => $map->[0],
 		window_from  => $from,
 		window_to    => $now,
-	};
+	);
+	# Coordinates come from the config file. An empty pair loads nothing.
+	if (SLMON::Dash::weather_on($ctx->{cfg})) {
+		$page{weather} = _db_query($ctx->{imsg},
+		    _bounded('weather', $from, $now, 5000, 'asc'));
+	}
+	return \%page;
 }
 
 sub _db_login {

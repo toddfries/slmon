@@ -369,6 +369,18 @@ sub chart_svg {
 			    if defined $p->{vmax};
 		}
 		$body = join('', @grid);
+		for my $b (@{ $o{bands} || [] }) {
+			next if !defined $b->{t0} || !defined $b->{t1} || $b->{t1} <= $b->{t0};
+			my $x0 = $x_of->($b->{t0});
+			my $x1 = $x_of->($b->{t1});
+			next if $x1 <= $x0;
+			my $kind = defined $b->{kind} ? $b->{kind} : '';
+			$body .= '<rect class="warn" x="' . sprintf('%.1f', $x0)
+			    . '" y="' . sprintf('%.1f', $top)
+			    . '" width="' . sprintf('%.1f', $x1 - $x0)
+			    . '" height="' . sprintf('%.1f', $ph) . '">'
+			    . '<title>' . _he($kind) . '</title></rect>';
+		}
 		if (@peak > 1) {
 			$body .= '<polyline class="peak" points="' . join(' ', @peak) . '"/>';
 		}
@@ -413,7 +425,63 @@ sub _series_chart {
 		to         => $to,
 		label_span => $label_span,
 		points     => \@p,
+		bands      => $_[8],
 	);
+}
+
+# True only when the operator wrote both coordinates. Nothing here invents them.
+sub weather_on {
+	my ($cfg) = @_;
+	return 0 if ref $cfg ne 'HASH';
+	return ($cfg->{latitude} // '') ne '' && ($cfg->{longitude} // '') ne '';
+}
+
+# A warning shades the latency chart until the next weather row, or the
+# window end when it is the last row. Rows outside the window contribute nothing.
+sub weather_bands {
+	my ($rows, $from, $to) = @_;
+	return [] if ref $rows ne 'ARRAY' || !defined $from || !defined $to || $to <= $from;
+	my @rows = sort { ($a->{ts} // 0) <=> ($b->{ts} // 0) }
+	    grep { defined $_->{ts} && $_->{ts} =~ /\A-?[0-9]+(?:\.[0-9]+)?\z/ } @$rows;
+	my @bands;
+	for my $i (0 .. $#rows) {
+		my $kind = $rows[$i]{warning};
+		next if !defined $kind || $kind eq '';
+		my $t0 = 0 + $rows[$i]{ts};
+		my $t1 = $i < $#rows ? 0 + $rows[$i + 1]{ts} : $to;
+		$t0 = $from if $t0 < $from;
+		$t1 = $to if $t1 > $to;
+		next if $t1 <= $t0;
+		push @bands, { t0 => $t0, t1 => $t1, kind => $kind };
+	}
+	return \@bands;
+}
+
+sub weather_card {
+	my ($rows) = @_;
+	return '' if ref $rows ne 'ARRAY';
+	my ($storm, $normal, $newest) = (0, 0);
+	for my $row (@$rows) {
+		my $w = $row->{warning};
+		if (defined $w && $w ne '') {
+			$storm++;
+		} else {
+			$normal++;
+		}
+		my $ts = $row->{ts};
+		$ts = -1 if !defined $ts || $ts !~ /\A-?[0-9]+(?:\.[0-9]+)?\z/;
+		$newest = $row if !defined $newest || $ts >= ($newest->{ts} // -1);
+	}
+	my $word = 'n/a';
+	if (defined $newest) {
+		my $w = $newest->{warning};
+		$word = (defined $w && $w ne '') ? $w : 'normal';
+	}
+	return '<section id="weather"><h2>Weather</h2><section class="stats">'
+	    . _stat('Storm', $storm)
+	    . _stat('Normal', $normal)
+	    . _stat('Latest', $word)
+	    . '</section></section>';
 }
 
 sub _rate_unit {
@@ -1110,9 +1178,12 @@ sub page {
 	my ($uscale, $uunit) = _rate_unit($pts, 'up');
 	# ever has no stored start. The axis begins at the first drawn point.
 	my $axis_from = defined $from ? $from : _earliest($pts, $obpts, $jpts);
+	my $lat_bands = exists $d->{weather}
+	    ? weather_bands($d->{weather}, $axis_from, $to) : undef;
+	my $weather_card = exists $d->{weather} ? weather_card($d->{weather}) : '';
 	my $quality = join '', map { _figure($_) } (
 		_series_chart('Packet loss', '%', 'drop', $pts, $axis_from, $to, 100, $sec),
-		_series_chart('Latency', 'ms', 'lat', $pts, $axis_from, $to, 1, $sec),
+		_series_chart('Latency', 'ms', 'lat', $pts, $axis_from, $to, 1, $sec, $lat_bands),
 		_series_chart('Jitter', 'ms', 'jitter', $jpts, $axis_from, $to, 1, $sec),
 		_series_chart('Obstruction', '%', 'obstr', $obpts, $axis_from, $to, 100, $sec),
 	);
@@ -1258,6 +1329,7 @@ sub page {
 	    . 'svg text{fill:#333;font-size:12px}'
 	    . 'svg .empty{fill:#666}'
 	    . 'svg line{stroke:#ddd}'
+	    . 'svg .warn{fill:#c2410c;opacity:0.28;stroke:none}'
 	    . 'svg .series{fill:none;stroke:#1d4e89;stroke-width:1.6}'
 	    . 'svg circle.series{fill:#1d4e89}'
 	    . 'svg .peak{fill:none;stroke:#9a3412;stroke-width:1;stroke-dasharray:3 3}'
@@ -1295,7 +1367,7 @@ sub page {
 	    . ($when ne '' ? '<p class="note' . $stale . '">Latest sample ' . _he($when)
 		. ($stale ? ', stale' : '') . '</p>' : '')
 	    . '</section>'
-	    . '<section id="quality"><h2>Quality</h2>' . $quality . '</section>'
+	    . '<section id="quality"><h2>Quality</h2>' . $quality . $weather_card . '</section>'
 	    . '<section id="throughput"><h2>Throughput</h2>' . $throughput . '</section>'
 	    . '<section id="dish"><h2>Dish</h2>'
 	    . $ob_stats

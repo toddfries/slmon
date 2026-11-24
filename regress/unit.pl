@@ -730,6 +730,47 @@ ok($clear =~ /id="dish"/
     && $clear =~ /Prolonged duration<\/span><b>n\/a</
     && $clear =~ /Prolonged interval<\/span><b>n\/a</,
     'a clear dish shows zero fraction and no prolonged sample');
+ok($sky !~ /id="weather"/ && $sky !~ /class="warn"/,
+    'the page skips weather when no coordinates are configured');
+ok(!SLMON::Dash::weather_on({})
+    && !SLMON::Dash::weather_on({ latitude => '32.1' })
+    && !SLMON::Dash::weather_on({ longitude => '-97.1' })
+    && SLMON::Dash::weather_on({ latitude => '32.1', longitude => '-97.1' }),
+    'weather loads only when both coordinates are set');
+my $storm = SLMON::Dash::page({
+	user => 'ops',
+	now => 100,
+	range => '24h',
+	window_from => 0,
+	window_to => 100,
+	series => [ { ts => 20, ping_latency_ms => 30 } ],
+	weather => [
+		{ ts => 10, warning => 'thunderstorm' },
+		{ ts => 40 },
+	],
+});
+ok($storm =~ /id="weather"/
+    && $storm =~ /Storm<\/span><b>1</
+    && $storm =~ /Normal<\/span><b>1</
+    && $storm =~ /Latest<\/span><b>normal</
+    && $storm =~ /class="warn" x="123\.0" y="16\.0" width="195\.0"/
+    && $storm =~ /<title>thunderstorm<\/title>/
+    && $storm !~ /latitude=/,
+    'a configured storm shades the latency chart');
+my $quiet_wx = SLMON::Dash::page({
+	user => 'ops',
+	now => 100,
+	range => '24h',
+	window_from => 0,
+	window_to => 100,
+	series => [ { ts => 20, ping_latency_ms => 30 } ],
+	weather => [],
+});
+ok($quiet_wx =~ /id="weather"/
+    && $quiet_wx =~ /Storm<\/span><b>0</
+    && $quiet_wx =~ /Latest<\/span><b>n\/a</
+    && $quiet_wx !~ /class="warn"/,
+    'configured weather with no rows draws an empty card');
 ok(join(' ', SLMON::StatusMap::alert_names(2)) eq 'motors_stuck',
     'alert bits decode to names');
 ok(SLMON::Dash::range_name('6h') eq '24h'
