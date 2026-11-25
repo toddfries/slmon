@@ -19,12 +19,26 @@ $SLMON::PROG = 'slctl';
 
 sub usage {
 	die <<"END";
-usage: slctl init|passwd|status|top|once [-c file] [-d db] [-l host:port]
+usage: slctl [-0] init|passwd|status|top|once [-c file] [-d db] [-l host:port]
+       slctl [-0] top [seconds] [-c file] [-d db] [-l host:port]
 END
+}
+
+my $once = 0;
+while (@ARGV && $ARGV[0] eq '-0') {
+	shift @ARGV;
+	$once = 1;
 }
 
 my $cmd = shift @ARGV;
 usage() if !defined $cmd || $cmd =~ /\A-/;
+die SLMON::err('-0 applies to top') if $once && $cmd ne 'top';
+
+my $interval;
+if ($cmd eq 'top' && @ARGV && $ARGV[0] =~ /\A[0-9]+\z/) {
+	$interval = 0 + shift @ARGV;
+	die SLMON::err('top interval is at least 1 second') if $interval < 1;
+}
 
 my ($file, $db, $listen);
 while (@ARGV) {
@@ -63,7 +77,11 @@ if ($cmd eq 'init') {
 } elsif ($cmd eq 'status') {
 	exit SLMON::Parent::status($cfg);
 } elsif ($cmd eq 'top') {
-	exit SLMON::Parent::top($cfg);
+	my $loop = !$once && -t STDIN && -t STDOUT;
+	exit SLMON::Parent::top($cfg,
+		loop     => $loop,
+		interval => $interval // 3,
+	);
 } elsif ($cmd eq 'once') {
 	exit SLMON::Parent::once($cfg);
 } else {

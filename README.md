@@ -47,7 +47,7 @@ From a checkout the same commands are `perl bin/sld` and `perl bin/slctl`.
 `-d` selects a SQLite file other than `/var/sl/sl.db`. `-l` overrides `listen`
 for that process. `-c` selects the configuration file.
 
-The sample file is `etc/sl.conf`. The listener defaults to loopback. A repeated `listen` line serves each address that binds. Open `http://127.0.0.1:8080/` for the dashboard. The History section shows uptime, the longest outage, the mean time between outages, and the local hour of each outage for the selected window. `slctl top` prints the latest sample and the open events. The login form
+The sample file is `etc/sl.conf`. The listener defaults to loopback. A repeated `listen` line serves each address that binds. Open `http://127.0.0.1:8080/` for the dashboard. The History section shows uptime, the longest outage, the mean time between outages, and the local hour of each outage for the selected window. `slctl top` refreshes every 3 seconds on a terminal. `slctl top N` sets the interval. `slctl -0 top` prints the latest sample and the open events once. The login form
 is `http://127.0.0.1:8080/login`. A successful login sets the
 `slmon_session` cookie and returns to `/`. The window is 24 hours, 7 days,
 30 days, 365 days, or the whole collection (`/?range=24h`). `GET /health` is open.

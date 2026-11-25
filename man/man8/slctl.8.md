@@ -7,7 +7,15 @@ SLCTL(8) - System Manager's Manual
 # SYNOPSIS
 
 **slctl**
+\[**-0**]
 **init**|**passwd**|**status**|**top**|**once**
+\[**-c**&nbsp;*file*]
+\[**-d**&nbsp;*db*]
+\[**-l**&nbsp;*host:port*]  
+**slctl**
+\[**-0**]
+**top**
+\[*seconds*]
 \[**-c**&nbsp;*file*]
 \[**-d**&nbsp;*db*]
 \[**-l**&nbsp;*host:port*]
@@ -97,12 +105,45 @@ It does not fork a daemon.
 
 **top**
 
-> Print the latest sample and the open events.
-> The sample lines are the time, downlink and uplink bits per second,
-> latency, loss, obstruction fraction, and dish uptime.
+> On a terminal, draw the monitor and refresh it until
+> **q**
+> or
+> `SIGINT`.
+> The default interval is 3 seconds.
+> *seconds*
+> selects another interval.
+> The floor is 1 second.
+> **-0**,
+> written before the command, prints one sample and exits.
+> A standard output that is not a terminal does the same, so a pipe
+> does not spin.
+> That sample is the time, downlink and uplink bits per second,
+> latency, loss, obstruction fraction, dish uptime, and the open events.
 > An open event is a disconnect that has not come back, or a dish
 > outage whose recorded end is still at or after the current time.
-> This opens the database read-only and does not print the device id.
+> Charts are ASCII and need at least 80 columns.
+> They grow with the height of the terminal.
+> A line under each chart marks even times across the window.
+> The dish map grows and shrinks with the terminal.
+> This opens the database read-only, does not open the dish, and does
+> not print the device id.
+
+> The keys are:
+
+> > o   overview
+> > l   quality
+> > t   throughput
+> > d   dish
+> > h   history
+> > c   config
+> > H   24h
+> > W   7d
+> > M   30d
+> > Y   365d
+> > E   ever
+> > \+   one second longer
+> > \-   one second shorter
+> > q   quit
 
 **once**
 
@@ -114,6 +155,12 @@ It does not fork a daemon.
 > error and the exit status is still 0.
 
 The options are as follows:
+
+**-0**
+
+> Print one sample and exit.
+> Only recognized before the command, and only with
+> **top**.
 
 **-c** *file*
 
@@ -171,4 +218,4 @@ crypt(3),
 sl.conf(5),
 sld(8)
 
-OpenBSD 8.0 - October 22, 2026 - SLCTL(8)
+OpenBSD 8.0 - November 25, 2026 - SLCTL(8)

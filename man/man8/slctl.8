@@ -1,5 +1,5 @@
 .\"
-.Dd $Mdocdate: October 22 2026 $
+.Dd $Mdocdate: November 25 2026 $
 .Dt SLCTL 8
 .Os
 .Sh NAME
@@ -7,7 +7,15 @@
 .Nd control the Starlink dish monitor
 .Sh SYNOPSIS
 .Nm slctl
+.Op Fl 0
 .Cm init Ns | Ns Cm passwd Ns | Ns Cm status Ns | Ns Cm top Ns | Ns Cm once
+.Op Fl c Ar file
+.Op Fl d Ar db
+.Op Fl l Ar host:port
+.Nm slctl
+.Op Fl 0
+.Cm top
+.Op Ar seconds
 .Op Fl c Ar file
 .Op Fl d Ar db
 .Op Fl l Ar host:port
@@ -92,12 +100,46 @@ so this is run as
 .Sy _sl
 or as root.
 .It Cm top
-Print the latest sample and the open events.
-The sample lines are the time, downlink and uplink bits per second,
-latency, loss, obstruction fraction, and dish uptime.
+On a terminal, draw the monitor and refresh it until
+.Ic q
+or
+.Dv SIGINT .
+The default interval is 3 seconds.
+.Ar seconds
+selects another interval.
+The floor is 1 second.
+.Fl 0 ,
+written before the command, prints one sample and exits.
+A standard output that is not a terminal does the same, so a pipe
+does not spin.
+That sample is the time, downlink and uplink bits per second,
+latency, loss, obstruction fraction, dish uptime, and the open events.
 An open event is a disconnect that has not come back, or a dish
 outage whose recorded end is still at or after the current time.
-This opens the database read-only and does not print the device id.
+Charts are ASCII and need at least 80 columns.
+They grow with the height of the terminal.
+A line under each chart marks even times across the window.
+The dish map grows and shrinks with the terminal.
+This opens the database read-only, does not open the dish, and does
+not print the device id.
+.Pp
+The keys are:
+.Bd -literal -offset indent
+o   overview
+l   quality
+t   throughput
+d   dish
+h   history
+c   config
+H   24h
+W   7d
+M   30d
+Y   365d
+E   ever
++   one second longer
+-   one second shorter
+q   quit
+.Ed
 .It Cm once
 Probe the dish once and print one status document as JSON.
 This does not start
@@ -109,6 +151,10 @@ error and the exit status is still 0.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
+.It Fl 0
+Print one sample and exit.
+Only recognized before the command, and only with
+.Cm top .
 .It Fl c Ar file
 Configuration file.
 .It Fl d Ar db

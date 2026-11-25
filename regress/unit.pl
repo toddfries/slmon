@@ -12,6 +12,7 @@ use SLMON::Config;
 use SLMON::DB;
 use MIME::Base64 qw(encode_base64);
 use SLMON::Dash;
+use SLMON::Top;
 use SLMON::Http;
 use SLMON::Parent;
 use SLMON::StatusMap;
@@ -978,6 +979,351 @@ ok($top_rc == 0
 	    && $rcbody =~ /rc_check\(\) \{\n\tpexp="sld: parent"\n/,
 	    'rc script sets the parent title after rc.subr');
 }
+
+my $top_now = 1_700_000_100;
+my $top_page = {
+	latest => {
+		ts => $top_now, downlink_bps => 142_000_000, uplink_bps => 18_400_000,
+		ping_latency_ms => 28, ping_drop_rate => 0,
+		obstr_fraction => 0.00012, uptime_s => 4 * 86400 + 2 * 3600,
+		device_id => 'SECRET', currently_obstructed => 0,
+		obstruction_duration => 12, obstruction_interval => 40,
+		direction_azimuth => 0, direction_elevation => 90,
+		snr => 9.5, gps_sats => 8,
+	},
+	info => {
+		device_id => 'SECRET', country_code => 'SECRET',
+		hardware_version => 'rev1', software_version => 'sw1', bootcount => 4,
+	},
+	events => [{ ts => $top_now, type => 'disconnect', details => 'down' }],
+	hour => [
+		{ ts => $top_now - 100, downlink_bps => 142_000_000, uplink_bps => 1_000_000 },
+		{ ts => $top_now - 10, downlink_bps => 1_000_000, uplink_bps => 18_400_000 },
+	],
+	series => [{
+		ts_minute => $top_now - 60, down_bytes => 2_000_000, up_bytes => 3_000_000,
+		avg_downlink_bps => 5_000_000, avg_uplink_bps => 1_000_000,
+		avg_ping_latency_ms => 28, avg_ping_drop_rate => 0,
+		avg_obstr_fraction => 0.01,
+	}],
+	obstruction => [{
+		ts => $top_now - 60, ping_latency_ms => 28,
+		ping_drop_rate => 0, obstr_fraction => 0.01,
+	}],
+	window_from => $top_now - 86400,
+	window_to => $top_now,
+	range => '24h',
+	now => $top_now,
+	cfg => {},
+};
+my $top_frame = SLMON::Top::frame($top_page,
+	width => 100, view => 'overview', interval => 3, now => $top_now);
+ok($top_frame =~ /overview/ && $top_frame =~ /every 3s/
+    && $top_frame =~ /142\.0 Mbit\/s/ && $top_frame =~ /18\.4 Mbit\/s/
+    && $top_frame =~ /uptime  4d 2h/
+    && $top_frame =~ /open  1700000100 disconnect down/
+    && $top_frame =~ /downlink, last hour/ && $top_frame =~ /#/
+    && $top_frame =~ /-60m/ && $top_frame !~ /SECRET/
+    && $top_frame !~ /device_id/ && $top_frame !~ / stale/,
+    'overview frame shows rates, the hour chart, and open events');
+my $stale = SLMON::Top::frame($top_page,
+	width => 100, now => $top_now + 121);
+ok($stale =~ / stale/, 'a sample older than 120 seconds is stale');
+my $narrow = SLMON::Top::frame($top_page, width => 40, now => $top_now);
+my $narrow_ok = ($narrow =~ /chart needs a wider terminal/)
+    && ($narrow =~ /142\.0 Mbit\/s/)
+    && ($narrow =~ /q quit/);
+ok($narrow_ok, 'a narrow terminal keeps the numbers and the keys');
+sub _plot_height {
+	my ($text, $title) = @_;
+	my ($n, $on) = (0, 0);
+	for my $line (split /\n/, $text) {
+		if (index($line, $title) == 0) {
+			$on = 1;
+			next;
+		}
+		next if !$on;
+		last if $line =~ /\+/;
+		$n++ if $line =~ /\|/;
+	}
+	return $n;
+}
+my $ov24 = SLMON::Top::frame($top_page,
+	width => 100, height => 24, view => 'overview', now => $top_now);
+my $ov40 = SLMON::Top::frame($top_page,
+	width => 100, height => 40, view => 'overview', now => $top_now);
+my $p24 = _plot_height($ov24, 'downlink, last hour');
+my $p40 = _plot_height($ov40, 'downlink, last hour');
+my $ov_grow = ($p40 > $p24) && ($p24 > 3)
+    && (scalar(split /\n/, $ov24) == 24)
+    && (scalar(split /\n/, $ov40) == 40);
+ok($ov_grow, 'overview charts grow with the terminal');
+my $q24 = SLMON::Top::frame($top_page,
+	width => 100, height => 24, view => 'quality', range => '24h',
+	now => $top_now);
+my $q48 = SLMON::Top::frame($top_page,
+	width => 100, height => 48, view => 'quality', range => '24h',
+	now => $top_now);
+my $q_grow = _plot_height($q48, 'latency, 24h')
+    > _plot_height($q24, 'latency, 24h');
+ok($q_grow, 'quality charts grow with the terminal');
+sub _time_under {
+	my ($text, $title) = @_;
+	my ($arm, $prev) = (0, '');
+	for my $line (split /\n/, $text) {
+		if (index($line, $title) == 0) {
+			$arm = 1;
+			$prev = '';
+			next;
+		}
+		next if !$arm;
+		return ($prev, $line) if $prev =~ /\A *\+\-/;
+		$prev = $line;
+	}
+	return ('', '');
+}
+sub _ago_secs {
+	my ($lab) = @_;
+	return 0 if $lab eq 'now';
+	return $1 * 86400 + $2 * 3600 if $lab =~ /\A-(\d+)d(\d+)h\z/;
+	return $1 * 86400 if $lab =~ /\A-(\d+)d\z/;
+	return $1 * 3600 if $lab =~ /\A-(\d+)h\z/;
+	return $1 * 60 if $lab =~ /\A-(\d+)m\z/;
+	return $1 if $lab =~ /\A-(\d+)s\z/;
+	return -1;
+}
+# Count of even labels under $title, or 0 when the line is wrong.
+# The first label sits on the first dash and the last sits on the last.
+sub _axis_even {
+	my ($text, $title, $span) = @_;
+	my ($base, $time) = _time_under($text, $title);
+	return 0 if $base !~ /\A *\+\-/ || $time eq '';
+	my $dash = index($base, '-');
+	my $end = rindex($base, '-');
+	return 0 if $dash < 0 || $end < $dash;
+	return 0 if length($time) < $end + 1;
+	my $body = substr($time, $dash, $end - $dash + 1);
+	return 0 if $body =~ /\A / || $body !~ /now\z/;
+	my (@labs, @at);
+	while ($body =~ /(\S+)/g) {
+		push @labs, $1;
+		push @at, [$-[0], $+[0]];
+	}
+	return 0 if @labs < 2;
+	for my $i (1 .. $#labs) {
+		return 0 if $at[$i][0] < $at[$i - 1][1] + 2;
+	}
+	my @ago = map { _ago_secs($_) } @labs;
+	return 0 if $ago[0] != $span || $ago[-1] != 0;
+	my $step = $ago[0] - $ago[1];
+	return 0 if $step <= 0;
+	for my $i (1 .. $#ago) {
+		return 0 if $ago[$i - 1] - $ago[$i] != $step;
+	}
+	return scalar @labs;
+}
+my $ov80 = SLMON::Top::frame($top_page,
+	width => 80, view => 'overview', now => $top_now);
+my $ov160 = SLMON::Top::frame($top_page,
+	width => 160, view => 'overview', now => $top_now);
+my $hour80 = _axis_even($ov80, 'downlink, last hour', 3600);
+my $hour160 = _axis_even($ov160, 'downlink, last hour', 3600);
+my $up160 = _axis_even($ov160, 'uplink, last hour', 3600);
+my $hour_axis = ($hour80 >= 2) && ($hour160 > $hour80) && ($up160 == $hour160);
+ok($hour_axis, 'overview time labels stay even and thicken as the terminal widens');
+my $q80 = SLMON::Top::frame($top_page,
+	width => 80, view => 'quality', range => '24h', now => $top_now);
+my $q160 = SLMON::Top::frame($top_page,
+	width => 160, view => 'quality', range => '24h', now => $top_now);
+my $lat80 = _axis_even($q80, 'latency, 24h', 86400);
+my $lat160 = _axis_even($q160, 'latency, 24h', 86400);
+my $ob160 = _axis_even($q160, 'obstruction, 24h', 86400);
+my $day_axis = ($lat80 >= 2) && ($lat160 > $lat80) && ($ob160 == $lat160);
+ok($day_axis, 'quality time labels stay even and thicken as the terminal widens');
+my $week_page = { %$top_page, range => '7d', window_from => $top_now - 7 * 86400 };
+my $week80 = SLMON::Top::frame($week_page,
+	width => 80, view => 'quality', range => '7d', now => $top_now);
+my $week160 = SLMON::Top::frame($week_page,
+	width => 160, view => 'quality', range => '7d', now => $top_now);
+my $week_line = (_time_under($week80, 'latency, 7d'))[1];
+my $week_line_w = (_time_under($week160, 'latency, 7d'))[1];
+my $week80n = _axis_even($week80, 'latency, 7d', 7 * 86400);
+my $week160n = _axis_even($week160, 'latency, 7d', 7 * 86400);
+my $week_axis = ($week80n >= 2) && ($week160n > $week80n)
+    && ($week_line !~ /-\d{3,}h/) && ($week_line_w !~ /-\d{3,}h/);
+ok($week_axis, 'a week of quality labels stays in days as the terminal changes');
+my $year_page = { %$top_page, range => '365d', window_from => $top_now - 365 * 86400 };
+my $year = SLMON::Top::frame($year_page,
+	width => 100, view => 'quality', range => '365d', now => $top_now);
+my $year_n = _axis_even($year, 'latency, 365d', 365 * 86400);
+ok($year_n == 2, 'a year chart marks the two ends when finer ticks do not fit');
+my $throughput = SLMON::Top::frame($top_page,
+	width => 100, view => 'throughput', range => '24h', now => $top_now);
+ok($throughput =~ /bytes down/ && $throughput =~ /2\.0 MB/
+    && $throughput =~ /bytes total/ && $throughput =~ /5\.0 MB/,
+    'throughput shows byte totals and the window rate');
+my $top_quiet = SLMON::Top::frame({
+	%$top_page,
+	weather => [{ ts => $top_now, warning => 'thunderstorm' }],
+    }, width => 100, view => 'quality', now => $top_now);
+ok($top_quiet =~ /latency, 24h/ && $top_quiet !~ /thunderstorm/,
+    'quality omits weather when coordinates are unset');
+my $top_storm = SLMON::Top::frame({
+	%$top_page,
+	cfg => { latitude => '44', longitude => '-92' },
+	weather => [{ ts => $top_now, warning => 'thunderstorm' }],
+    }, width => 100, view => 'quality', now => $top_now);
+ok($top_storm =~ /weather  thunderstorm/ && $top_storm =~ /latency, 24h/,
+    'quality names the stored weather warning');
+my @cell;
+for my $r (0 .. 7) {
+	for my $c (0 .. 7) {
+		push @cell, $r == 0 ? -1 : ($c < 4 ? 0 : 1.5);
+	}
+}
+my $dish = SLMON::Top::frame({
+	%$top_page,
+	map => {
+		num_rows => 8, num_cols => 8,
+		snr_b64 => encode_base64(pack('f<*', @cell), ''),
+	},
+    }, width => 100, view => 'dish', now => $top_now);
+ok($dish =~ /rev1/ && $dish =~ /boot 4/ && $dish =~ /#/ && $dish =~ /\./
+    && $dish =~ /\+/ && $dish =~ /currently  no/
+    && $dish !~ /SECRET/ && $dish !~ /device_id/,
+    'dish view draws the map and hides the device id');
+sub _map_box {
+	my ($text) = @_;
+	my ($wide, $high, $on) = (0, 0, 0);
+	for my $line (split /\n/, $text) {
+		if ($line =~ /map  space unmeasured/) {
+			$on = 1;
+			next;
+		}
+		next if !$on;
+		last if $line !~ /\A[ .+#]+\z/;
+		$high++;
+		$wide = length($line) if length($line) > $wide;
+	}
+	return ($wide, $high);
+}
+my $dish_map = {
+	num_rows => 8, num_cols => 8,
+	snr_b64 => encode_base64(pack('f<*', @cell), ''),
+};
+my $dish_big = SLMON::Top::frame({ %$top_page, map => $dish_map },
+	width => 120, height => 40, view => 'dish', now => $top_now);
+my $dish_small = SLMON::Top::frame({ %$top_page, map => $dish_map },
+	width => 40, height => 18, view => 'dish', now => $top_now);
+my ($map_bw, $map_bh) = _map_box($dish_big);
+my ($map_sw, $map_sh) = _map_box($dish_small);
+my $map_fit = ($map_bw > $map_sw) && ($map_bh > $map_sh)
+    && ($map_bw > 40) && ($dish_big =~ /\+/) && ($dish_small =~ /\+/);
+ok($map_fit, 'dish map grows and shrinks with the terminal');
+my $nomap = SLMON::Top::frame($top_page, width => 100, view => 'dish', now => $top_now);
+ok($nomap =~ /no obstruction map stored/, 'a missing map is said in words');
+my @hours = (0) x 24;
+$hours[3] = 2;
+my $hist = SLMON::Top::frame({
+	%$top_page,
+	sla => {
+		uptime => 0.9, longest_s => 30, mtbo_s => 10,
+		busiest => 3, hours => \@hours,
+	},
+	sla_events => [
+		{ ts => $top_now - 80000, type => 'disconnect', details => 'down' },
+		{ ts => $top_now - 79700, type => 'disconnect', details => 'up',
+		    duration_s => 300 },
+		{ ts => $top_now - 100, type => 'ping_ok', details => 'ok' },
+		{ ts => $top_now - 50, type => 'obstruction', details => 'fraction=0.2' },
+	],
+	events => [
+		{ ts => $top_now - 100, type => 'ping_ok', details => 'ok' },
+		{ ts => $top_now - 79700, type => 'disconnect', details => 'up' },
+	],
+    }, width => 100, view => 'history', now => $top_now);
+ok($hist =~ /uptime  90\.000%/ && $hist =~ /calendar  [#.]+/
+    && $hist =~ /#/ && $hist =~ /\./
+    && $hist =~ /disconnect up/ && $hist !~ /ping_ok/,
+    'history shows uptime and a one-row calendar');
+my $cfg_frame = SLMON::Top::frame({
+	%$top_page,
+	cfg => {
+		db => 'sqlite', db_path => '/tmp/sl.db',
+		listen => '127.0.0.1:8080', dish_host => '192.168.100.1',
+		dish_interval_s => 30, admin_pass_hash => 'SECRET',
+		session_secret => 'SECRET', pg_password => 'SECRET',
+	},
+	initialized => 'yes', http_port => '8080', history_n => 3,
+	view_meta => {
+		db => 'sqlite', dish_host => '192.168.100.1', dish_port => 9200,
+		sample_s => 30, map_s => 300, listen => '127.0.0.1:8080',
+		raw_days => 90, minute_days => 730, hour_days => 365,
+	},
+    }, width => 100, view => 'config', now => $top_now);
+ok($cfg_frame =~ /initialized  yes/ && $cfg_frame =~ /listen  127\.0\.0\.1:8080/
+    && $cfg_frame =~ /retention  raw 90d/ && $cfg_frame !~ /SECRET/,
+    'config shows listen and retention and hides the password');
+my $keys = { view => 'overview', range => '7d', interval => 3 };
+ok(SLMON::Top::apply_key($keys, 'H') && $keys->{range} eq '24h', 'H selects 24h');
+ok(SLMON::Top::apply_key($keys, 'l') && $keys->{view} eq 'quality',
+    'l selects quality');
+ok(SLMON::Top::apply_key($keys, '+') && $keys->{interval} == 4,
+    'plus lengthens the interval');
+$keys->{interval} = 1;
+ok(SLMON::Top::apply_key($keys, '-') && $keys->{interval} == 1,
+    'minus stops at 1 second');
+ok(!SLMON::Top::apply_key($keys, 'q') && !SLMON::Top::apply_key($keys, 'Q'),
+    'q quits');
+
+SLMON::DB::upsert_dish_info($dbh, {
+	device_id => 'SECRET', hardware_version => 'rev1',
+	software_version => 'sw1', country_code => 'SECRET',
+	bootcount => 4, last_seen_ts => 9_000_000_000,
+});
+my $loaded = eval { SLMON::Top::load($dbh, $dbcfg, '24h', time) };
+my $loaded_dish = $loaded
+    ? SLMON::Top::frame($loaded, width => 100, view => 'dish', now => time)
+    : '';
+ok($loaded && $loaded_dish =~ /rev1/ && $loaded_dish =~ /boot 4/
+    && $loaded_dish =~ /no obstruction map stored/ && $loaded_dish !~ /SECRET/,
+    'top load reads the database and hides the device id');
+
+sub _slctl_out {
+	my (@args) = @_;
+	my $pid = open my $fh, '-|';
+	die "fork: $!" if !defined $pid;
+	if ($pid == 0) {
+		open STDERR, '>&STDOUT';
+		exec $^X, "$FindBin::Bin/../bin/slctl", @args;
+		die "exec: $!";
+	}
+	my $text = '';
+	eval {
+		local $SIG{ALRM} = sub { die "hung\n" };
+		alarm 5;
+		$text = do { local $/; <$fh> };
+		alarm 0;
+	};
+	if ($@) {
+		kill 'TERM', $pid;
+		close $fh;
+		return ('', 1);
+	}
+	close $fh;
+	return ($text, $?);
+}
+my ($piped, $piped_rc) = _slctl_out('top', '-d', "$dir/t.db");
+ok(!$piped_rc && $piped =~ /latest_ts: 9000000000\n/
+    && $piped =~ /down_bps: 42\n/ && $piped !~ /SECRET/,
+    'a pipe gets one sample from slctl top');
+my ($once_out, $once_rc) = _slctl_out('-0', 'top', '-d', "$dir/t.db");
+ok(!$once_rc && $once_out =~ /latest_ts: 9000000000\n/ && $once_out !~ /SECRET/,
+    'slctl -0 top prints one sample');
+my ($zero_out, $zero_rc) = _slctl_out('top', '0', '-d', "$dir/t.db");
+ok($zero_rc && $zero_out =~ /at least 1/, 'top rejects an interval of 0');
+my ($flag_out, $flag_rc) = _slctl_out('-0', 'status');
+ok($flag_rc && $flag_out =~ /-0 applies to top/, '-0 applies only to top');
 
 print "$n tests, $fail failed\n";
 exit($fail ? 1 : 0);

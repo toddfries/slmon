@@ -12,6 +12,7 @@ use SLMON::Auth;
 use SLMON::Config;
 use SLMON::Dash;
 use SLMON::DB;
+use SLMON::Top;
 use SLMON::DishProc;
 use SLMON::Http;
 use SLMON::Imsg;
@@ -530,7 +531,10 @@ sub run {
 }
 
 sub top {
-	my ($cfg) = @_;
+	my ($cfg, %opt) = @_;
+	if ($opt{loop}) {
+		return SLMON::Top::loop($cfg, $opt{interval});
+	}
 	my $dbh = eval { SLMON::DB::open_db($cfg, readonly => 1) };
 	if (!$dbh) {
 		print "database: closed\n";
