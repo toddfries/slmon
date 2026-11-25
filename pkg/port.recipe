@@ -1,6 +1,6 @@
 # OpenBSD wip port. github= fetches the pushed commit. The bake script is the build.
 name=slmon
-version=0.4
+version=0.5
 github=toddfries/slmon
 category=net
 comment=unofficial Starlink dish monitor
